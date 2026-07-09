@@ -1,0 +1,1733 @@
+/* ============================================================
+   COMPASSO · Companheiro de tratamento GLP-1 (protótipo NutriEase)
+   Arquivo único, sem dependências externas.
+   Persistência: localStorage com fallback em memória.
+   Insights: motor local baseado em regras (descritivo, nunca
+   prescritivo) — camada pronta para ser trocada pela IA do
+   backend NutriEase no futuro.
+   ============================================================ */
+
+/* ---------- storage seguro (localStorage + fallback) ---------- */
+const store = (()=>{
+  let mem={}, ok=false;
+  try{const k='__c__';localStorage.setItem(k,'1');localStorage.removeItem(k);ok=true;}catch(e){ok=false;}
+  return{
+    get(k){ if(ok){try{return localStorage.getItem(k);}catch(e){}} return k in mem?mem[k]:null; },
+    set(k,v){ if(ok){try{localStorage.setItem(k,v);return true;}catch(e){}} mem[k]=v;return false; }
+  };
+})();
+const KEY='compasso_state_v1';
+let S = load();
+
+function load(){
+  try{const raw=store.get(KEY); if(raw) return JSON.parse(raw);}catch(e){}
+  return null;
+}
+function save(){
+  try{ if(!store.set(KEY,JSON.stringify(S))) toast('Salvo nesta sessão (armazenamento local indisponível aqui)'); }
+  catch(e){ toast('Não foi possível salvar (armazenamento cheio)'); }
+}
+
+/* ---------- helpers ---------- */
+const WD=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
+const WDs=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+const pad=n=>String(n).padStart(2,'0');
+function todayISO(d=new Date()){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
+function parseISO(s){const[y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d);}
+function fmtBR(iso){const d=parseISO(iso);return pad(d.getDate())+'/'+pad(d.getMonth()+1);}
+function fmtBRy(iso){const d=parseISO(iso);return pad(d.getDate())+'/'+pad(d.getMonth()+1)+'/'+d.getFullYear();}
+function daysBetween(a,b){return Math.round((parseISO(b)-parseISO(a))/864e5);}
+function daysAgo(iso){return Math.round((new Date().setHours(0,0,0,0)-parseISO(iso))/864e5);}
+function nf(n,d=1){return Number(n).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+
+function toast(msg){
+  const t=document.createElement('div');t.className='toast';t.textContent=msg;document.body.appendChild(t);
+  setTimeout(()=>{t.style.opacity='0';t.style.transition='.3s';setTimeout(()=>t.remove(),300);},2200);
+}
+
+/* ---------- derived data ---------- */
+function sortedWeigh(){return[...S.weighings].sort((a,b)=>a.date<b.date?-1:1);}
+function currentWeight(){const w=sortedWeigh();return w.length?w[w.length-1].peso:S.profile.pesoInicial;}
+function lost(){return +(S.profile.pesoInicial-currentWeight()).toFixed(1);}
+function lostPct(){return S.profile.pesoInicial?(lost()/S.profile.pesoInicial*100):0;}
+function imc(){const h=S.profile.altura/100;return h?currentWeight()/(h*h):0;}
+function daysTreat(){return daysAgo(S.profile.dataInicio)+1;}
+function lastApp(){const a=[...S.applications].sort((x,y)=>x.date<y.date?-1:1);return a.length?a[a.length-1]:null;}
+
+function nextAppInfo(){
+  const wd=S.profile.diaAplicacao; // 0-6
+  const now=new Date(); now.setHours(0,0,0,0);
+  let diff=(wd-now.getDay()+7)%7;
+  // se aplicou hoje, próxima é daqui 7
+  const la=lastApp();
+  if(diff===0 && la && la.date===todayISO()) diff=7;
+  const next=new Date(now); next.setDate(now.getDate()+diff);
+  return {days:diff,date:todayISO(next),weekday:WD[wd]};
+}
+function ringProgress(){ // 0..1 quanto já passou da semana
+  const d=nextAppInfo().days; return (7-d)/7;
+}
+function penRemaining(){
+  const p=S.pen; if(!p||!p.capacidadeMg||!p.doseMg) return null;
+  const total=Math.floor(p.capacidadeMg/p.doseMg);
+  const rest=Math.max(0,total-(p.usadas||0));
+  return {total,rest,frac:total?rest/total:0};
+}
+
+/* ---------- example data ---------- */
+function seedExample(){
+  const start=new Date(); start.setDate(start.getDate()-118);
+  const startISO=todayISO(start);
+  const profile={nome:'Débora',medicamento:'Mounjaro',doseAtual:'7,5',unidade:'mg',
+    diaAplicacao:5,dataInicio:startISO,pesoInicial:96,pesoMeta:72,altura:165,
+    metaAgua:3,metaProteina:100};
+  const weighings=[]; const w0=96;
+  const pts=[[0,96],[14,93.2],[28,91.1],[42,89.4],[56,87.6],[70,86.0],[84,84.9],[98,83.7],[112,82.4]];
+  pts.forEach(([off,pw],i)=>{
+    const d=new Date(start);d.setDate(start.getDate()+off);
+    weighings.push({date:todayISO(d),peso:pw,
+      cintura:98-i*1.6,quadril:112-i*1.1,braco:34-i*.35,coxa:62-i*.7,abdomen:104-i*1.7,foto:null});
+  });
+  const applications=[]; const meds='Mounjaro'; let dose=['2,5','2,5','2,5','2,5','5','5','5','5','7,5','7,5','7,5','7,5','7,5','7,5','7,5','7,5','7,5'];
+  const sites=['Abdômen','Coxa direita','Coxa esquerda','Braço direito','Braço esquerdo'];
+  for(let i=0;i<17;i++){const d=new Date(start);d.setDate(start.getDate()+i*7);
+    applications.push({date:todayISO(d),dose:dose[i]||'7,5',medicamento:meds,local:sites[i%5]});}
+  const dailyLogs={};
+  for(let i=0;i<25;i++){const d=new Date();d.setDate(d.getDate()-i);
+    const iso=todayISO(d);const dApp=(6-d.getDay()+7)%7; // dias desde sexta
+    const sint=[]; if(dApp<=1&&Math.random()<.7)sint.push('Náusea'); if(Math.random()<.25)sint.push('Constipação'); if(!sint.length&&Math.random()<.5)sint.push('Sem sintomas');
+    dailyLogs[iso]={sintomas:sint,agua:1.6+Math.random()*1.5,proteina:Math.round(70+Math.random()*40),
+      exercicios:Math.random()<.5?['Caminhada']:[],humor:3+Math.round(Math.random()*2),
+      apetite:dApp<=2?'Muito baixo':'Baixo',fomeEmocional:Math.random()<.3?'Ansiedade':'Nenhuma'};
+  }
+  const exams=[{date:startISO,tipo:'Hemoglobina glicada',valor:'6,2%'},{date:todayISO(new Date()),tipo:'Hemoglobina glicada',valor:'5,4%'},
+    {date:startISO,tipo:'Triglicerídeos',valor:'180 mg/dL'}];
+  const agenda=[{date:todayISO(new Date(Date.now()+9*864e5)),tipo:'Consulta',obs:'Retorno nutricional'}];
+  const bd=off=>{const d=new Date(start);d.setDate(start.getDate()+off);return todayISO(d);};
+  const bio=[
+    {date:bd(0),  gordura:42.0, massaMagra:55.7, musculo:52.9, agua:44.5, visceral:12, tmb:1520},
+    {date:bd(56), gordura:38.4, massaMagra:54.0, musculo:51.3, agua:47.0, visceral:10, tmb:1478},
+    {date:bd(112),gordura:35.1, massaMagra:53.5, musculo:50.8, agua:48.9, visceral:9,  tmb:1451},
+  ];
+  return {profile,weighings,applications,dailyLogs,exams,agenda,bio,
+    pen:{capacidadeMg:60,doseMg:7.5,usadas:5},created:startISO};
+}
+function blankState(p){
+  return {profile:p,weighings:[{date:p.dataInicio,peso:p.pesoInicial}],applications:[],dailyLogs:{},
+    exams:[],agenda:[],bio:[],pen:{capacidadeMg:0,doseMg:0,usadas:0},created:p.dataInicio};
+}
+
+/* ============================================================
+   ROUTER / RENDER
+   ============================================================ */
+let TAB='inicio', SUB=null;
+function go(tab,sub=null){TAB=tab;SUB=sub;render();window.scrollTo(0,0);}
+
+function render(){
+  const app=document.getElementById('app');
+  if(!S){ app.innerHTML=obView(); bindOb(); return; }
+  app.innerHTML = topView() + `<div class="screen" id="scr"></div>` + navView();
+  const scr=document.getElementById('scr');
+  let html='';
+  if(TAB==='inicio') html=inicioView();
+  else if(TAB==='aplicacao') html=aplicacaoView();
+  else if(TAB==='evolucao') html=evolucaoView();
+  else if(TAB==='diario') html=diarioView();
+  else if(TAB==='mais') html=SUB?maisSubView(SUB):maisView();
+  else if(TAB==='proteina') html=proteinaView();
+  scr.innerHTML=html;
+  bindScreen();
+}
+
+/* ---------- Topbar ---------- */
+function greeting(){const h=new Date().getHours();return h<12?'Bom dia':h<18?'Boa tarde':'Boa noite';}
+function topView(){
+  const titles={inicio:'',aplicacao:'',evolucao:'',diario:'',mais:''};
+  return `<div class="top">
+    <div class="brand">
+      ${logoSVG(22)}
+      <div><h1>Compasso</h1><div class="greet">${greeting()}, ${esc(S.profile.nome)}</div></div>
+    </div>
+    <button class="badge-ico" onclick="openSheet('perfil')" aria-label="Configurações">${icon('gear')}</button>
+  </div>`;
+}
+
+/* ---------- Bottom nav ---------- */
+function navView(){
+  const t=(id,lbl,ic)=>`<button class="${TAB===id?'on':''}" onclick="go('${id}')">${icon(ic)}<span>${lbl}</span></button>`;
+  return `<div class="nav">
+    ${t('inicio','Início','home')}
+    ${t('aplicacao','Aplicação','syringe')}
+    <button aria-label="Novo registro" style="position:relative;flex:1" onclick="openSheet('menuadd')">
+      <span class="fab">${icon('plus',true)}</span><span style="margin-top:30px;color:var(--green);font-size:10px;font-weight:700">Registrar</span>
+    </button>
+    ${t('evolucao','Evolução','chart')}
+    ${t('mais','Mais','grid')}
+  </div>`;
+}
+
+/* ============================================================
+   TELA · INÍCIO
+   ============================================================ */
+function inicioView(){
+  const na=nextAppInfo(); const prog=ringProgress();
+  const dl=daysBetween(todayISO(),na.date);
+  const pen=penRemaining();
+  const l=lost(); const dir=l>=0?'down':'up';
+  const goalRemain=+(currentWeight()-S.profile.pesoMeta).toFixed(1);
+  return `
+  <div class="hero">
+    <div class="lbl">Próxima aplicação</div>
+    <div class="name">${esc(S.profile.medicamento)}</div>
+    <div class="ringwrap">
+      <div class="ring">${ringSVG(prog,S.profile.doseAtual,S.profile.unidade)}</div>
+      <div class="next">
+        <div class="big">${na.days===0?'Hoje':na.days+(na.days===1?' dia':' dias')}</div>
+        <div class="cap">${na.days===0?'Dia de aplicar 💧':na.weekday+', '+fmtBR(na.date)}</div>
+        <span class="med">Dose ${esc(S.profile.doseAtual)} ${esc(S.profile.unidade)}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="stat">
+      <div class="k">Peso atual</div>
+      <div class="v">${nf(currentWeight())}<small> kg</small></div>
+      <span class="delta ${dir}">${l>=0?'−':'+'}${nf(Math.abs(l))} kg · ${nf(Math.abs(lostPct()))}%</span>
+    </div>
+    <div class="stat good">
+      <div class="k">Faltam p/ meta</div>
+      <div class="v">${goalRemain>0?nf(goalRemain):'0,0'}<small> kg</small></div>
+      <span class="delta down">Meta ${nf(S.profile.pesoMeta)} kg</span>
+    </div>
+  </div>
+
+  <div class="grid3">
+    <div class="stat"><div class="k">Tratamento</div><div class="v" style="font-size:20px">${daysTreat()}<small> d</small></div></div>
+    <div class="stat"><div class="k">Aplicações</div><div class="v" style="font-size:20px">${S.applications.length}</div></div>
+    <div class="stat"><div class="k">IMC</div><div class="v" style="font-size:20px">${nf(imc())}</div></div>
+  </div>
+
+  ${pen?`<div class="card tight">
+    <div class="between"><span class="eyebrow" style="margin:0">Caneta atual</span>
+    ${pen.rest<=1?'<span class="pill">Acabando</span>':''}</div>
+    <div class="pen ${pen.rest<=1?'low':''}"><span style="width:${Math.max(6,pen.frac*100)}%"></span></div>
+    <div class="between"><span class="muted" style="font-size:13px">Restam <b>${pen.rest}</b> de ${pen.total} aplicações</span>
+    <button class="btn btn-ghost btn-sm" onclick="openSheet('caneta')">Gerir</button></div>
+    ${pen.rest<=1?'<div class="muted" style="font-size:12px;margin-top:8px">🔔 Sua caneta acaba na próxima aplicação. Vale comprar a próxima.</div>':''}
+  </div>`:''}
+
+  <div class="card tight">
+    <div class="eyebrow">Evolução do peso</div>
+    ${lineChart(sortedWeigh().map(w=>({x:w.date,y:w.peso})),S.profile.pesoMeta)}
+  </div>
+
+  ${topInsight()}
+  `;
+}
+function topInsight(){
+  const ins=buildInsights();
+  if(!ins.length){
+    return `<div class="card tight" style="margin-top:14px">
+      <div class="eyebrow">Acompanhamento</div>
+      <div class="insight"><span class="ico">${icon('steth')}</span>
+      <p>Mantenha seu acompanhamento médico e nutricional em dia — são eles que conduzem seu tratamento com segurança.<span class="care">O Compasso complementa, não substitui, a sua equipe de saúde.</span></p></div>
+      <button class="btn btn-outline btn-block btn-sm" onclick="go('mais','insights')">Ver insights</button></div>`;
+  }
+  const i=ins[0];
+  return `<div class="card tight" style="margin-top:14px">
+    <div class="eyebrow">Insight da semana</div>
+    <div class="insight ${i.tone}"><span class="ico">${icon('spark')}</span>
+    <p>${i.text}${i.care?`<span class="care">${i.care}</span>`:''}</p></div>
+    <button class="btn btn-outline btn-block btn-sm" onclick="go('mais','insights')">Ver todos os insights</button></div>`;
+}
+
+/* ============================================================
+   TELA · APLICAÇÃO
+   ============================================================ */
+function aplicacaoView(){
+  const apps=[...S.applications].sort((a,b)=>a.date<b.date?1:-1);
+  const pen=penRemaining();
+  const na=nextAppInfo();
+  return `
+  <div class="scr-title">Aplicação</div>
+  <div class="scr-sub">Registro semanal, rodízio de locais e controle das canetas.</div>
+
+  <div class="card">
+    <div class="between"><h3 class="mb0">Próxima dose</h3><span class="pill" style="background:var(--green-soft);color:var(--green-deep)">${na.days===0?'Hoje':na.weekday}</span></div>
+    <div class="row" style="margin-top:12px">
+      <div class="badge-ico" style="width:48px;height:48px;flex:0 0 48px">${icon('syringe')}</div>
+      <div><div style="font-weight:800;font-size:16px">${esc(S.profile.medicamento)} · ${esc(S.profile.doseAtual)} ${esc(S.profile.unidade)}</div>
+      <div class="muted" style="font-size:13px">${na.days===0?'Dia de aplicar':'Em '+na.days+' dia(s) · '+fmtBRy(na.date)}</div></div>
+    </div>
+    <button class="btn btn-primary btn-block mt14" onclick="openSheet('aplicar')">${icon('plus',true)} Registrar aplicação</button>
+  </div>
+
+  <div class="card">
+    <h3>Rodízio dos locais</h3>
+    <p class="muted" style="font-size:13px;margin:-4px 0 6px">Alterne para não aplicar sempre no mesmo lugar. ${lastApp()?'Último: <b>'+esc(lastApp().local)+'</b>.':''}</p>
+    ${bodyMapSVG(lastApp()?lastApp().local:null,null)}
+  </div>
+
+  ${pen?`<div class="card">
+    <div class="between"><h3 class="mb0">Caneta atual</h3><button class="btn btn-ghost btn-sm" onclick="openSheet('caneta')">Editar</button></div>
+    <div class="pen ${pen.rest<=1?'low':''}" style="margin-top:12px"><span style="width:${Math.max(6,pen.frac*100)}%"></span></div>
+    <div class="grid3" style="margin:6px 0 0">
+      <div><div class="k faint" style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;font-weight:700">Caneta</div><div style="font-weight:800">${nf(S.pen.capacidadeMg,0)} mg</div></div>
+      <div><div class="k faint" style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;font-weight:700">Dose</div><div style="font-weight:800">${nf(S.pen.doseMg,S.pen.doseMg%1?1:0)} mg</div></div>
+      <div><div class="k faint" style="font-size:10px;text-transform:uppercase;letter-spacing:.1em;font-weight:700">Restam</div><div style="font-weight:800;color:${pen.rest<=1?'var(--amber)':'var(--green)'}">${pen.rest} apl.</div></div>
+    </div>
+  </div>`:`<div class="card center"><p class="muted" style="font-size:13px">Configure sua caneta para acompanhar quantas aplicações restam.</p><button class="btn btn-ghost btn-block" onclick="openSheet('caneta')">Configurar caneta</button></div>`}
+
+  <div class="card">
+    <h3>Histórico de aplicações</h3>
+    <div class="list">
+      ${apps.length?apps.slice(0,12).map(a=>`<div class="item">
+        <div class="badge-ico">${icon('syringe')}</div>
+        <div><div class="t">${esc(a.local)}</div><div class="s">${fmtBRy(a.date)} · ${esc(a.medicamento)}</div></div>
+        <div class="r">${esc(a.dose)} ${esc(S.profile.unidade)}</div></div>`).join('')
+        :'<p class="muted center" style="font-size:13px;padding:8px 0">Nenhuma aplicação registrada ainda.</p>'}
+    </div>
+  </div>`;
+}
+
+/* ============================================================
+   TELA · EVOLUÇÃO
+   ============================================================ */
+function evolucaoView(){
+  const w=sortedWeigh();
+  const first=w[0], last=w[w.length-1];
+  const measures=[['cintura','Cintura'],['quadril','Quadril'],['abdomen','Abdômen'],['coxa','Coxa'],['braco','Braço']];
+  const photos=S.weighings.filter(x=>x.foto).sort((a,b)=>a.date<b.date?-1:1);
+  return `
+  <div class="scr-title">Evolução</div>
+  <div class="scr-sub">Peso, medidas e fotos. Às vezes o peso trava, mas as medidas seguem mudando.</div>
+
+  <div class="card tight">
+    <div class="between"><span class="eyebrow" style="margin:0">Peso (kg)</span>
+    <span class="delta down">${nf(lost())} kg no total</span></div>
+    ${lineChart(w.map(x=>({x:x.date,y:x.peso})),S.profile.pesoMeta)}
+  </div>
+
+  <button class="btn btn-primary btn-block" onclick="openSheet('pesar')">${icon('plus',true)} Nova pesagem</button>
+
+  <div class="card tight" style="margin-top:14px" onclick="go('mais','bio')">
+    <div class="row" style="cursor:pointer">
+      <div class="badge-ico">${icon('pulse')}</div>
+      <div style="flex:1"><div class="t" style="font-weight:800">Bioimpedância</div>
+      <div class="s muted" style="font-size:12px">${(S.bio&&S.bio.length)?'Última: '+nf((()=>{const b=[...S.bio].sort((a,c)=>a.date<c.date?1:-1)[0];return b.gordura;})())+'% de gordura':'Registre sua composição corporal'}</div></div>
+      <div class="faint">${icon('chevron')}</div>
+    </div>
+  </div>
+
+  <div class="card mt14">
+    <h3>Medidas corporais</h3>
+    ${measures.map(([k,lbl])=>{
+      const withM=w.filter(x=>x[k]!=null);
+      if(withM.length<1) return '';
+      const f=withM[0][k], l=withM[withM.length-1][k], d=+(l-f).toFixed(1);
+      return `<div class="between" style="padding:10px 0;border-bottom:1px solid var(--line)">
+        <div><div style="font-weight:700;font-size:14px">${lbl}</div>
+        <div class="muted" style="font-size:12px">${nf(l)} cm agora</div></div>
+        <span class="delta ${d<=0?'down':'up'}">${d<=0?'−':'+'}${nf(Math.abs(d))} cm</span></div>`;
+    }).join('')||'<p class="muted" style="font-size:13px">Adicione medidas em uma pesagem para ver a evolução.</p>'}
+  </div>
+
+  <div class="card">
+    <div class="between"><h3 class="mb0">Fotos de evolução</h3>
+    <button class="btn btn-ghost btn-sm" onclick="openSheet('pesar')">Adicionar</button></div>
+    ${photos.length?`<div class="gallery" style="margin-top:12px">
+      ${photos.length>=2?`<div class="photo"><img src="${photos[0].foto}"><span class="cap">Antes · ${fmtBR(photos[0].date)}</span></div>
+      <div class="photo"><img src="${photos[photos.length-1].foto}"><span class="cap">Agora · ${fmtBR(photos[photos.length-1].date)}</span></div>`
+      :`<div class="photo"><img src="${photos[0].foto}"><span class="cap">${fmtBR(photos[0].date)}</span></div>`}
+    </div>`:'<p class="muted center" style="font-size:13px;padding:10px 0">Nenhuma foto ainda. Uma foto por mês já mostra bastante diferença.</p>'}
+  </div>`;
+}
+
+/* ============================================================
+   TELA · DIÁRIO (registro do dia)
+   ============================================================ */
+const SINTOMAS=['Náusea','Azia','Vômito','Constipação','Diarreia','Dor de cabeça','Fadiga','Gases','Sem sintomas'];
+const EXERC=['Caminhada','Musculação','Corrida','Bike','Yoga','Natação'];
+const APET=['Muito baixo','Baixo','Normal','Alto','Muito alto'];
+const FOME=['Ansiedade','Tédio','Fome','Tristeza','Nenhuma'];
+const HUMORS=['😞','😕','😐','🙂','😄'];
+
+function todayLog(){
+  const iso=todayISO();
+  if(!S.dailyLogs[iso]) S.dailyLogs[iso]={sintomas:[],agua:0,proteina:0,exercicios:[],humor:0,apetite:'',fomeEmocional:''};
+  const L=S.dailyLogs[iso];
+  if(!L.prot) L.prot={ovo:0,frango:0,carne:0,peixe:0,queijo:0,iogurte:0,leite:0,outros:L.proteina||0};
+  return L;
+}
+function diarioView(){
+  const L=todayLog();
+  const glasses=Math.round((L.agua||0)/0.25);
+  const metaGlasses=Math.round(S.profile.metaAgua/0.25);
+  return `
+  <div class="scr-title">Diário de hoje</div>
+  <div class="scr-sub">${WD[new Date().getDay()]}, ${fmtBRy(todayISO())} · leva menos de um minuto.</div>
+
+  <div class="card">
+    <h3>Como você está?</h3>
+    <div class="seg" style="margin-bottom:6px">
+      ${HUMORS.map((e,i)=>`<button class="${L.humor===i+1?'active':''}" onclick="setHumor(${i+1})" style="font-size:20px">${e}</button>`).join('')}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Sintomas</h3>
+    <div class="chips">
+      ${SINTOMAS.map(s=>`<button class="chip ${s!=='Sem sintomas'?'rose':''} ${L.sintomas.includes(s)?'active':''}" onclick="toggleSint('${s}')">${s}</button>`).join('')}
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="between"><h3 class="mb0">Água</h3><span class="muted" style="font-weight:800">${nf(L.agua||0)} / ${nf(S.profile.metaAgua)} L</span></div>
+    <div class="waterrow" style="margin-top:12px">
+      ${Array.from({length:metaGlasses}).map((_,i)=>dropSVG(i<glasses,i)).join('')}
+    </div>
+    <div class="quickrow">
+      <button class="btn btn-ghost btn-sm" onclick="addWater(0.25)">+ 1 copo (250 ml)</button>
+      <button class="btn btn-outline btn-sm" onclick="addWater(-0.25)">− copo</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="between"><h3 class="mb0">Meta proteica</h3><span class="muted" style="font-weight:800">${L.proteina||0} / ${S.profile.metaProteina} g</span></div>
+    ${proteinBar(L.proteina||0,S.profile.metaProteina)}
+    <div class="muted" style="font-size:12.5px;margin:2px 0 12px">${Math.round(Math.min(100,(L.proteina||0)/S.profile.metaProteina*100))}% da meta atingida hoje</div>
+    <button class="btn btn-ghost btn-block" onclick="go('proteina')">${icon('plus',true)} Registrar por alimento</button>
+  </div>
+
+  <div class="card">
+    <h3>Exercício</h3>
+    <div class="chips">${EXERC.map(e=>`<button class="chip ${L.exercicios.includes(e)?'active':''}" onclick="toggleEx('${e}')">${e}</button>`).join('')}</div>
+  </div>
+
+  <div class="card">
+    <h3>Apetite hoje</h3>
+    <div class="chips">${APET.map(a=>`<button class="chip ${L.apetite===a?'active':''}" onclick="setApet('${a}')">${a}</button>`).join('')}</div>
+  </div>
+
+  <div class="card">
+    <h3>Vontade de comer por…</h3>
+    <div class="chips">${FOME.map(f=>`<button class="chip ${f!=='Nenhuma'?'rose':''} ${L.fomeEmocional===f?'active':''}" onclick="setFome('${f}')">${f}</button>`).join('')}</div>
+  </div>`;
+}
+
+/* ============================================================
+   TELA · MAIS (hub)
+   ============================================================ */
+function maisView(){
+  const items=[
+    ['jornada','Minha jornada','Resumo automático da sua evolução','spark','amber'],
+    ['relatorio','Relatório de Evolução','Gere um PDF do seu progresso','doc','amber'],
+    ['insights','Insights','Padrões cruzados dos seus registros','chart',''],
+    ['conquistas','Conquistas','Marcos do tratamento','medal','amber'],
+    ['timeline','Linha do tempo','Todos os eventos em ordem','clock',''],
+    ['bio','Bioimpedância','Composição corporal ao longo do tempo','pulse',''],
+    ['stats','Estatísticas','Números do seu tratamento','grid',''],
+    ['calc','Calculadora','Quanto falta para cada meta','calc',''],
+    ['exames','Exames','Guarde e acompanhe resultados','flask',''],
+    ['agenda','Agenda','Consultas, exames e retornos','cal',''],
+  ];
+  return `
+  <div class="scr-title">Mais</div>
+  <div class="scr-sub">Sua jornada em detalhe.</div>
+  <div class="card" style="padding:6px 18px">
+  <div class="list">
+    ${items.map(([id,t,s,ic,tone])=>`<div class="item" onclick="go('mais','${id}')" style="cursor:pointer">
+      <div class="badge-ico ${tone}">${icon(ic)}</div>
+      <div><div class="t">${t}</div><div class="s">${s}</div></div>
+      <div class="r faint">${icon('chevron')}</div></div>`).join('')}
+  </div></div>
+  <button class="btn btn-outline btn-block" onclick="openSheet('perfil')">${icon('gear',true)} Configurações e dados</button>`;
+}
+function maisSubView(sub){
+  const back=`<button class="btn btn-outline btn-sm" onclick="go('mais')" style="margin-bottom:14px">${icon('chevron',false,true)} Voltar</button>`;
+  if(sub==='jornada') return back+journeyView();
+  if(sub==='insights') return back+insightsView();
+  if(sub==='conquistas') return back+achView();
+  if(sub==='timeline') return back+timelineView();
+  if(sub==='bio') return back+bioView();
+  if(sub==='relatorio') return back+relatorioView();
+  if(sub==='stats') return back+statsView();
+  if(sub==='calc') return back+calcView();
+  if(sub==='exames') return back+examesView();
+  if(sub==='agenda') return back+agendaView();
+  return back;
+}
+
+function journeyView(){
+  const l=lost(); const pct=lostPct();
+  const measWith=S.weighings.filter(x=>x.cintura!=null).sort((a,b)=>a.date<b.date?-1:1);
+  const cinturaDelta=measWith.length>=2?(measWith[0].cintura-measWith[measWith.length-1].cintura).toFixed(1):null;
+  const txt=`Você iniciou o tratamento em ${fmtBRy(S.profile.dataInicio)} com ${nf(S.profile.pesoInicial)} kg. `+
+    `Após ${daysTreat()} dias, já ${l>=0?'perdeu':'variou'} ${nf(Math.abs(l))} kg (${nf(Math.abs(pct))}% do peso inicial), `+
+    `realizou ${S.applications.length} aplicações de ${esc(S.profile.medicamento)} e chegou à dose de ${esc(S.profile.doseAtual)} ${esc(S.profile.unidade)}. `+
+    (cinturaDelta&&cinturaDelta>0?`Sua cintura reduziu cerca de ${nf(cinturaDelta)} cm no período. `:'')+
+    `${l>=0&&currentWeight()>S.profile.pesoMeta?`Faltam ${nf(currentWeight()-S.profile.pesoMeta)} kg para sua meta de ${nf(S.profile.pesoMeta)} kg.`:'Você alcançou sua meta de peso.'}`;
+  return `
+  <div class="scr-title" style="margin-bottom:14px">Minha jornada</div>
+  <div class="journey">
+    ${logoSVG(30,'#fff')}
+    <p class="q" style="margin-top:14px">${txt}</p>
+    <div class="sig">Resumo gerado automaticamente</div>
+  </div>
+  <p class="muted center" style="font-size:12.5px;margin-top:14px">Você pode mostrar este resumo na próxima consulta.</p>
+  <button class="btn btn-ghost btn-block" onclick="shareJourney()">${icon('share',true)} Copiar resumo</button>`;
+}
+
+/* ---------- card fixo: acompanhamento profissional ---------- */
+function careCard(){
+  const cons=[...(S.agenda||[])].filter(a=>/consulta|retorno/i.test(a.tipo)).sort((a,b)=>a.date<b.date?-1:1);
+  const upcoming=cons.find(a=>daysBetween(todayISO(),a.date)>=0);
+  const past=[...cons].reverse().find(a=>daysBetween(todayISO(),a.date)<0);
+  let line='';
+  if(upcoming){const d=daysBetween(todayISO(),upcoming.date);
+    line=d===0?'📅 Você tem uma consulta marcada para hoje.':`📅 Sua próxima consulta é em ${d} dia(s), em ${fmtBRy(upcoming.date)}.`;}
+  else if(past){const d=Math.abs(daysBetween(todayISO(),past.date));
+    if(d>=45) line=`📅 Faz ${d} dias desde seu último retorno. Considere agendar uma nova consulta.`;}
+  else line='📅 Você ainda não tem consultas registradas na agenda.';
+  return `<div class="card" style="border:1.5px solid var(--green)">
+    <div class="row" style="gap:12px;align-items:flex-start">
+      <div class="badge-ico">${icon('steth')}</div>
+      <div style="flex:1">
+        <div style="font-weight:800;font-size:14px;margin-bottom:5px">Seu tratamento é conduzido por profissionais</div>
+        <p style="margin:0;font-size:13px;line-height:1.55;color:var(--ink-soft)">O Compasso organiza seus registros, mas quem conduz o tratamento é a sua equipe de saúde. O <b>acompanhamento médico</b> é essencial para avaliar dose, prescrição e segurança; o <b>acompanhamento nutricional</b> garante proteína adequada, preservação da massa magra e o manejo dos sintomas ao longo do uso do análogo de GLP-1.</p>
+        ${line?`<p style="margin:11px 0 0;font-size:12.5px;font-weight:700;color:var(--ink)">${line}</p>`:''}
+        <button class="btn btn-ghost btn-sm" style="margin-top:12px" onclick="openSheet('compromisso')">${icon('cal',true)} Agendar consulta</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function insightsView(){
+  const ins=buildInsights();
+  return `<div class="scr-title" style="margin-bottom:6px">Insights</div>
+  <div class="scr-sub">Padrões observados nos seus registros. Servem para você se conhecer melhor e não substituem a orientação do seu médico e nutricionista.</div>
+  ${careCard()}
+  ${ins.length?ins.map(i=>`<div class="insight ${i.tone}"><span class="ico">${icon(i.icon||'spark')}</span>
+    <p>${i.text}${i.care?`<span class="care">${i.care}</span>`:''}</p></div>`).join('')
+    :'<div class="card center muted" style="font-size:13px">Registre alguns dias no diário para começarmos a encontrar padrões.</div>'}`;
+}
+
+function achView(){
+  const list=achievements();
+  return `<div class="scr-title" style="margin-bottom:6px">Conquistas</div>
+  <div class="scr-sub">${list.filter(a=>a.on).length} de ${list.length} desbloqueadas</div>
+  <div class="ach">${list.map(a=>`<div class="medal ${a.on?'on':''}">
+    <div class="ic">${a.ic}</div><div class="mt">${a.t}</div><div class="ms">${a.s}</div></div>`).join('')}</div>`;
+}
+
+function timelineView(){
+  const ev=[];
+  ev.push({date:S.profile.dataInicio,txt:'Início do tratamento · '+nf(S.profile.pesoInicial)+' kg',tone:'amber'});
+  S.applications.forEach(a=>ev.push({date:a.date,txt:'Aplicação · '+esc(a.dose)+' '+esc(S.profile.unidade)+' · '+esc(a.local),tone:''}));
+  sortedWeigh().forEach((w,i)=>{if(i>0)ev.push({date:w.date,txt:'Pesagem · '+nf(w.peso)+' kg',tone:''});});
+  achievements().filter(a=>a.on&&a.date).forEach(a=>ev.push({date:a.date,txt:'Conquista · '+a.t,tone:'amber'}));
+  ev.sort((a,b)=>a.date<b.date?1:-1);
+  return `<div class="scr-title" style="margin-bottom:14px">Linha do tempo</div>
+  <div class="card"><div class="tl">
+    ${ev.slice(0,40).map(e=>`<div class="ev ${e.tone}"><div class="d">${fmtBRy(e.date)}</div><div class="txt">${e.txt}</div></div>`).join('')}
+  </div></div>`;
+}
+
+function statsView(){
+  const waterTotal=Object.values(S.dailyLogs).reduce((s,l)=>s+(l.agua||0),0);
+  const photos=S.weighings.filter(x=>x.foto).length;
+  const doses=S.applications.map(a=>parseFloat(String(a.dose).replace(',','.'))).filter(n=>!isNaN(n));
+  const avgDose=doses.length?doses.reduce((a,b)=>a+b,0)/doses.length:0;
+  const cards=[
+    ['Dias em tratamento',daysTreat()],
+    ['Peso perdido',nf(lost())+' kg'],
+    ['Total de aplicações',S.applications.length],
+    ['Dose média',nf(avgDose,avgDose%1?1:0)+' '+S.profile.unidade],
+    ['Pesagens registradas',S.weighings.length],
+    ['Água acumulada',nf(waterTotal,0)+' L'],
+    ['Fotos registradas',photos],
+    ['IMC atual',nf(imc())],
+  ];
+  if(S.bio&&S.bio.length){const last=[...S.bio].sort((a,b)=>a.date<b.date?1:-1)[0];
+    if(last.gordura!=null)cards.push(['Gordura corporal',nf(last.gordura)+'%']);
+    if(last.massaMagra!=null)cards.push(['Massa magra',nf(last.massaMagra)+' kg']);}
+  return `<div class="scr-title" style="margin-bottom:14px">Estatísticas</div>
+  <div class="grid2">${cards.map(([k,v])=>`<div class="stat"><div class="k">${k}</div><div class="v" style="font-size:22px">${v}</div></div>`).join('')}</div>`;
+}
+
+function calcView(){
+  const cw=currentWeight(); const h=S.profile.altura/100;
+  const targets=[
+    ['Sua meta',S.profile.pesoMeta],
+    ['IMC 24,9 (limite saudável)',h?+(24.9*h*h).toFixed(1):null],
+    ['5% do peso inicial',+(S.profile.pesoInicial*0.95).toFixed(1)],
+    ['10% do peso inicial',+(S.profile.pesoInicial*0.90).toFixed(1)],
+  ];
+  return `<div class="scr-title" style="margin-bottom:6px">Calculadora</div>
+  <div class="scr-sub">Quanto falta para cada objetivo, a partir de ${nf(cw)} kg.</div>
+  <div class="card"><div class="list">
+    ${targets.map(([k,t])=>{if(t==null)return'';const d=+(cw-t).toFixed(1);
+      return `<div class="item"><div class="badge-ico ${d<=0?'':'amber'}">${d<=0?icon('check'):icon('flag')}</div>
+      <div><div class="t">${k}</div><div class="s">Alvo: ${nf(t)} kg</div></div>
+      <div class="r" style="color:${d<=0?'var(--green)':'var(--ink)'}">${d<=0?'Alcançado':'faltam '+nf(d)+' kg'}</div></div>`;}).join('')}
+  </div></div>`;
+}
+
+function examesView(){
+  const ex=[...S.exams].sort((a,b)=>a.date<b.date?1:-1);
+  const byType={}; ex.forEach(e=>{(byType[e.tipo]=byType[e.tipo]||[]).push(e);});
+  return `<div class="scr-title" style="margin-bottom:6px">Exames</div>
+  <div class="scr-sub">Guarde resultados e acompanhe a evolução.</div>
+  <button class="btn btn-primary btn-block" onclick="openSheet('exame')">${icon('plus',true)} Adicionar resultado</button>
+  <div class="card mt14"><div class="list">
+    ${ex.length?ex.map(e=>`<div class="item"><div class="badge-ico">${icon('flask')}</div>
+      <div><div class="t">${esc(e.tipo)}</div><div class="s">${fmtBRy(e.date)}</div></div>
+      <div class="r">${esc(e.valor)}</div></div>`).join('')
+      :'<p class="muted center" style="font-size:13px;padding:8px 0">Nenhum exame guardado ainda.</p>'}
+  </div></div>`;
+}
+
+function agendaView(){
+  const ag=[...S.agenda].sort((a,b)=>a.date<b.date?-1:1).filter(a=>daysAgo(a.date)<=0||true);
+  return `<div class="scr-title" style="margin-bottom:6px">Agenda</div>
+  <div class="scr-sub">Consultas, exames e retornos.</div>
+  <button class="btn btn-primary btn-block" onclick="openSheet('compromisso')">${icon('plus',true)} Novo compromisso</button>
+  <div class="card mt14"><div class="list">
+    ${ag.length?ag.map(a=>{const d=daysBetween(todayISO(),a.date);
+      return `<div class="item"><div class="badge-ico ${d<0?'':'amber'}">${icon('cal')}</div>
+      <div><div class="t">${esc(a.tipo)}</div><div class="s">${esc(a.obs||'')}</div></div>
+      <div class="r" style="font-size:12px">${fmtBRy(a.date)}<br><span class="faint" style="font-weight:700">${d===0?'hoje':d>0?'em '+d+'d':Math.abs(d)+'d atrás'}</span></div></div>`;}).join('')
+      :'<p class="muted center" style="font-size:13px;padding:8px 0">Nenhum compromisso agendado.</p>'}
+  </div></div>`;
+}
+
+/* ============================================================
+   INSIGHTS (motor local, descritivo — nunca prescritivo)
+   ============================================================ */
+function buildInsights(){
+  const out=[];
+  const w=sortedWeigh();
+  // 1. tendência de peso 4 semanas
+  if(w.length>=2){
+    const recent=w.filter(x=>daysAgo(x.date)<=28);
+    if(recent.length>=2){
+      const d=+(recent[0].peso-recent[recent.length-1].peso).toFixed(1);
+      if(d>0) out.push({tone:'',icon:'chart',text:`Você perdeu <b>${nf(d)} kg</b> nas últimas quatro semanas.`});
+    }
+  }
+  // 2. sintoma x aplicação
+  const days=Object.entries(S.dailyLogs);
+  const appDates=new Set(S.applications.map(a=>a.date));
+  let nearNausea=0, nearTotal=0;
+  days.forEach(([iso,l])=>{
+    // dia seguinte a aplicação?
+    const prev=todayISO(new Date(parseISO(iso).getTime()-864e5));
+    if(appDates.has(prev)){nearTotal++; if((l.sintomas||[]).includes('Náusea'))nearNausea++;}
+  });
+  if(nearTotal>=2 && nearNausea/nearTotal>=0.5)
+    out.push({tone:'',icon:'spark',text:`Você costuma registrar <b>náusea no dia seguinte à aplicação</b>. Refeições mais leves nesse dia podem ajudar.`});
+  // 3. constipação persistente -> encaminhar médico
+  const recentDays=days.filter(([iso])=>daysAgo(iso)<=21).map(([,l])=>l);
+  const constip=recentDays.filter(l=>(l.sintomas||[]).includes('Constipação')).length;
+  if(constip>=3)
+    out.push({tone:'rose',icon:'alert',text:`Você relatou <b>constipação em ${constip} dias</b> nas últimas semanas.`,
+      care:'Se estiver persistindo ou piorando, vale conversar com seu médico ou nutricionista.'});
+  // 4. hidratação
+  const waterDays=recentDays.filter(l=>l.agua!=null&&l.agua>0);
+  if(waterDays.length>=3){
+    const avg=waterDays.reduce((s,l)=>s+l.agua,0)/waterDays.length;
+    if(avg<S.profile.metaAgua*0.8)
+      out.push({tone:'amber',icon:'drop',text:`Sua hidratação recente (média de <b>${nf(avg)} L/dia</b>) está abaixo da sua meta de ${nf(S.profile.metaAgua)} L. Beber mais água ajuda a reduzir efeitos como constipação e fadiga.`});
+  }
+  // 5. proteína
+  const protDays=recentDays.filter(l=>l.proteina>0);
+  if(protDays.length>=3){
+    const avg=protDays.reduce((s,l)=>s+l.proteina,0)/protDays.length;
+    if(avg<S.profile.metaProteina*0.75)
+      out.push({tone:'',icon:'spark',text:`Sua ingestão de proteína (média de <b>${Math.round(avg)} g/dia</b>) está abaixo da meta. Manter a proteína preserva massa muscular durante a perda de peso.`});
+  }
+  // 6. bioimpedância: tendência de massa magra
+  if(S.bio&&S.bio.length>=2){
+    const b=[...S.bio].sort((x,y)=>x.date<y.date?-1:1);
+    const dLean=+((b[b.length-1].massaMagra||0)-(b[0].massaMagra||0)).toFixed(1);
+    const dFat=+((b[b.length-1].gordura||0)-(b[0].gordura||0)).toFixed(1);
+    if(dFat<0) out.push({tone:'',icon:'pulse',text:`Seu percentual de gordura caiu <b>${nf(Math.abs(dFat))} pontos</b> desde a primeira bioimpedância.`});
+    if(dLean<-1) out.push({tone:'amber',icon:'pulse',text:`Sua massa magra reduziu cerca de <b>${nf(Math.abs(dLean))} kg</b> no período. Priorizar proteína e treino de força ajuda a preservar músculo durante o tratamento.`,
+      care:'Se a perda de massa magra continuar, vale conversar com seu nutricionista e seu médico.'});
+  }
+  return out;
+}
+
+/* ============================================================
+   CONQUISTAS
+   ============================================================ */
+function achievements(){
+  const l=lost(); const dt=daysTreat(); const na=S.applications.length;
+  const firstPhoto=S.weighings.find(x=>x.foto);
+  const mk=(cond,ic,t,s,date)=>({on:!!cond,ic,t,s,date:cond?date:null});
+  const w=sortedWeigh();
+  const dateAtLoss=kg=>{for(const x of w){if(S.profile.pesoInicial-x.peso>=kg)return x.date;}return null;};
+  const startPlus=d=>{const dt2=new Date(parseISO(S.profile.dataInicio));dt2.setDate(dt2.getDate()+d);return todayISO(dt2);};
+  return [
+    mk(l>=1,'🌱','Primeiro kg','−1 kg alcançado',dateAtLoss(1)),
+    mk(l>=5,'🎯','−5 kg','Marco importante',dateAtLoss(5)),
+    mk(l>=10,'🏆','−10 kg','Grande conquista',dateAtLoss(10)),
+    mk(dt>=30,'📅','Primeiro mês','30 dias de tratamento',startPlus(30)),
+    mk(dt>=90,'🔥','3 meses','Consistência',startPlus(90)),
+    mk(dt>=180,'💎','6 meses','Persistência',startPlus(180)),
+    mk(dt>=100,'💯','100 dias','Cem dias de jornada',startPlus(100)),
+    mk(firstPhoto,'📸','Primeira foto','Registro visual',firstPhoto?firstPhoto.date:null),
+  ];
+}
+
+/* ============================================================
+   SHEETS (modais de registro)
+   ============================================================ */
+let SHEET=null, tmp={};
+function openSheet(id){SHEET=id;tmp={};renderSheet();}
+function closeSheet(){const b=document.getElementById('bd');if(b)b.remove();SHEET=null;}
+function renderSheet(){
+  let old=document.getElementById('bd'); if(old)old.remove();
+  if(!SHEET)return;
+  const bd=document.createElement('div');bd.className='backdrop';bd.id='bd';
+  bd.onclick=e=>{if(e.target===bd)closeSheet();};
+  bd.innerHTML=`<div class="sheet"><div class="grab"></div>${sheetBody(SHEET)}</div>`;
+  document.body.appendChild(bd);
+  bindSheet(SHEET);
+}
+function sheetBody(id){
+  if(id==='menuadd') return `<h2>Registrar</h2><p class="sub">O que você quer anotar agora?</p>
+    <div class="quickrow" style="grid-template-columns:1fr 1fr;gap:10px">
+      <button class="btn btn-primary" onclick="closeSheet();openSheet('aplicar')">${icon('syringe',true)} Aplicação</button>
+      <button class="btn btn-ghost" onclick="closeSheet();openSheet('pesar')">${icon('scale',true)} Pesagem</button>
+      <button class="btn btn-outline" onclick="closeSheet();go('diario')">${icon('book',true)} Diário</button>
+      <button class="btn btn-outline" onclick="closeSheet();openSheet('exame')">${icon('flask',true)} Exame</button>
+    </div>`;
+  if(id==='aplicar'){
+    tmp.local=tmp.local||(lastAppNext());
+    tmp.dose=S.profile.doseAtual; tmp.med=S.profile.medicamento; tmp.date=todayISO();
+    const meds=['Ozempic','Wegovy','Mounjaro','Zepbound','Saxenda','Outro'];
+    return `<h2>Registrar aplicação</h2><p class="sub">Alterne o local para preservar a pele.</p>
+      <div class="field-2"><div class="field"><label>Data</label><input type="date" id="ap-date" value="${todayISO()}"></div>
+      <div class="field"><label>Dose (${esc(S.profile.unidade)})</label><input id="ap-dose" value="${esc(S.profile.doseAtual)}" inputmode="decimal"></div></div>
+      <div class="field"><label>Medicamento</label><select id="ap-med">${meds.map(m=>`<option ${m===S.profile.medicamento?'selected':''}>${m}</option>`).join('')}</select></div>
+      <label style="display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);font-weight:700;margin-bottom:6px">Local da aplicação</label>
+      <div class="card tight" style="margin-bottom:14px">${bodyMapSVG(lastApp()?lastApp().local:null,tmp.local,true)}
+        <div class="center muted" style="font-size:13px;margin-top:4px">Selecionado: <b id="ap-localtxt">${esc(tmp.local)}</b></div></div>
+      <label class="row" style="gap:8px;margin-bottom:16px;font-size:13px"><input type="checkbox" id="ap-pen" checked style="width:auto"> Descontar 1 aplicação da caneta atual</label>
+      <button class="btn btn-primary btn-block" onclick="saveApp()">Salvar aplicação</button>`;
+  }
+  if(id==='pesar'){
+    return `<h2>Nova pesagem</h2><p class="sub">Peso, medidas e uma foto (opcional).</p>
+      <div class="field-2"><div class="field"><label>Data</label><input type="date" id="pw-date" value="${todayISO()}"></div>
+      <div class="field"><label>Peso (kg)</label><input id="pw-peso" inputmode="decimal" placeholder="${nf(currentWeight())}"></div></div>
+      <div class="eyebrow" style="margin:6px 0 8px">Medidas (cm) · opcional</div>
+      <div class="field-2"><div class="field"><label>Cintura</label><input id="pw-cintura" inputmode="decimal"></div>
+      <div class="field"><label>Quadril</label><input id="pw-quadril" inputmode="decimal"></div></div>
+      <div class="field-2"><div class="field"><label>Abdômen</label><input id="pw-abdomen" inputmode="decimal"></div>
+      <div class="field"><label>Coxa</label><input id="pw-coxa" inputmode="decimal"></div></div>
+      <div class="field"><label>Braço</label><input id="pw-braco" inputmode="decimal"></div>
+      <div class="field"><label>Foto de evolução (opcional)</label><input type="file" accept="image/*" id="pw-foto"></div>
+      <button class="btn btn-primary btn-block" onclick="savePesagem()">Salvar pesagem</button>`;
+  }
+  if(id==='caneta'){
+    return `<h2>Controle da caneta</h2><p class="sub">Acompanhe quantas aplicações ainda restam.</p>
+      <div class="field-2"><div class="field"><label>Capacidade (mg)</label><input id="pn-cap" inputmode="decimal" value="${S.pen.capacidadeMg||''}" placeholder="ex: 60"></div>
+      <div class="field"><label>Dose semanal (mg)</label><input id="pn-dose" inputmode="decimal" value="${S.pen.doseMg||''}" placeholder="ex: 7,5"></div></div>
+      <div class="field"><label>Aplicações já feitas com esta caneta</label><input id="pn-used" inputmode="numeric" value="${S.pen.usadas||0}"></div>
+      <button class="btn btn-primary btn-block" onclick="savePen()">Salvar caneta</button>`;
+  }
+  if(id==='exame'){
+    const tipos=['Hemoglobina glicada','Colesterol total','Triglicerídeos','Vitamina D','Vitamina B12','Ferritina','TSH','Outro'];
+    return `<h2>Adicionar exame</h2><p class="sub">Guarde o resultado para acompanhar a evolução.</p>
+      <div class="field"><label>Exame</label><select id="ex-tipo">${tipos.map(t=>`<option>${t}</option>`).join('')}</select></div>
+      <div class="field-2"><div class="field"><label>Data</label><input type="date" id="ex-date" value="${todayISO()}"></div>
+      <div class="field"><label>Resultado</label><input id="ex-val" placeholder="ex: 5,4%"></div></div>
+      <button class="btn btn-primary btn-block" onclick="saveExame()">Salvar exame</button>`;
+  }
+  if(id==='compromisso'){
+    const tipos=['Consulta','Exame','Retorno','Renovar receita','Comprar caneta'];
+    return `<h2>Novo compromisso</h2><p class="sub">Nunca perca um retorno ou uma receita vencendo.</p>
+      <div class="field"><label>Tipo</label><select id="cp-tipo">${tipos.map(t=>`<option>${t}</option>`).join('')}</select></div>
+      <div class="field"><label>Data</label><input type="date" id="cp-date" value="${todayISO()}"></div>
+      <div class="field"><label>Observação</label><input id="cp-obs" placeholder="opcional"></div>
+      <button class="btn btn-primary btn-block" onclick="saveCompromisso()">Agendar</button>`;
+  }
+  if(id==='bio'){
+    return `<h2>Nova bioimpedância</h2><p class="sub">Preencha os campos que sua balança ou exame informar. Todos são opcionais.</p>
+      <div class="field"><label>Data</label><input type="date" id="bi-date" value="${todayISO()}"></div>
+      <div class="field-2"><div class="field"><label>Gordura corporal (%)</label><input id="bi-gordura" inputmode="decimal" placeholder="ex: 35,1"></div>
+      <div class="field"><label>Massa magra (kg)</label><input id="bi-massaMagra" inputmode="decimal" placeholder="ex: 53,5"></div></div>
+      <div class="field-2"><div class="field"><label>Massa muscular (kg)</label><input id="bi-musculo" inputmode="decimal" placeholder="opcional"></div>
+      <div class="field"><label>Água corporal (%)</label><input id="bi-agua" inputmode="decimal" placeholder="opcional"></div></div>
+      <div class="field-2"><div class="field"><label>Gordura visceral</label><input id="bi-visceral" inputmode="decimal" placeholder="nível"></div>
+      <div class="field"><label>Metabolismo basal (kcal)</label><input id="bi-tmb" inputmode="numeric" placeholder="opcional"></div></div>
+      <button class="btn btn-primary btn-block" onclick="saveBio()">Salvar bioimpedância</button>`;
+  }
+  if(id==='perfil'){
+    const p=S.profile; const meds=['Ozempic','Wegovy','Mounjaro','Zepbound','Saxenda','Outro'];
+    return `<h2>Configurações</h2><p class="sub">Ajuste seus dados e metas.</p>
+      <div class="field"><label>Nome</label><input id="pf-nome" value="${esc(p.nome)}"></div>
+      <div class="field-2"><div class="field"><label>Medicamento</label><select id="pf-med">${meds.map(m=>`<option ${m===p.medicamento?'selected':''}>${m}</option>`).join('')}</select></div>
+      <div class="field"><label>Dose atual (${esc(p.unidade)})</label><input id="pf-dose" value="${esc(p.doseAtual)}"></div></div>
+      <div class="field"><label>Dia da aplicação</label><select id="pf-dia">${WD.map((d,i)=>`<option value="${i}" ${i===p.diaAplicacao?'selected':''}>${d}</option>`).join('')}</select></div>
+      <div class="field-2"><div class="field"><label>Altura (cm)</label><input id="pf-altura" inputmode="numeric" value="${p.altura}"></div>
+      <div class="field"><label>Peso meta (kg)</label><input id="pf-meta" inputmode="decimal" value="${p.pesoMeta}"></div></div>
+      <div class="field-2"><div class="field"><label>Meta de água (L)</label><input id="pf-agua" inputmode="decimal" value="${p.metaAgua}"></div>
+      <div class="field"><label>Meta proteína (g)</label><input id="pf-prot" inputmode="numeric" value="${p.metaProteina}"></div></div>
+      <button class="btn btn-primary btn-block" onclick="savePerfil()">Salvar alterações</button>
+      <button class="btn btn-outline btn-block mt8" onclick="resetAll()" style="color:var(--rose);border-color:var(--rose-soft)">Apagar todos os dados</button>`;
+  }
+  return '';
+}
+function lastAppNext(){ // sugere próximo local no rodízio
+  const order=['Abdômen','Coxa direita','Coxa esquerda','Braço direito','Braço esquerdo'];
+  const la=lastApp(); if(!la)return order[0];
+  const i=order.indexOf(la.local); return order[(i+1)%order.length];
+}
+
+/* ---------- saves ---------- */
+function saveApp(){
+  const date=val('ap-date'), dose=val('ap-dose'), med=val('ap-med'), local=tmp.local;
+  if(!date||!dose){toast('Preencha data e dose');return;}
+  S.applications.push({date,dose,medicamento:med,local});
+  if(document.getElementById('ap-pen').checked && S.pen.capacidadeMg) S.pen.usadas=(S.pen.usadas||0)+1;
+  S.profile.doseAtual=dose; S.profile.medicamento=med;
+  save();closeSheet();toast('Aplicação registrada 💧');render();
+}
+function savePesagem(){
+  const date=val('pw-date'), peso=numBR(val('pw-peso'));
+  if(!date||!peso){toast('Informe data e peso');return;}
+  const rec={date,peso};
+  ['cintura','quadril','abdomen','coxa','braco'].forEach(k=>{const v=numBR(val('pw-'+k));if(v)rec[k]=v;});
+  const file=document.getElementById('pw-foto').files[0];
+  const finish=()=>{ // substitui pesagem do mesmo dia se existir
+    S.weighings=S.weighings.filter(w=>w.date!==date); S.weighings.push(rec);
+    save();closeSheet();toast('Pesagem salva');render();
+  };
+  if(file){ downscale(file,700,dataUrl=>{rec.foto=dataUrl;finish();}); }
+  else finish();
+}
+function savePen(){
+  S.pen={capacidadeMg:numBR(val('pn-cap'))||0,doseMg:numBR(val('pn-dose'))||0,usadas:parseInt(val('pn-used'))||0};
+  save();closeSheet();toast('Caneta atualizada');render();
+}
+function saveExame(){
+  const tipo=val('ex-tipo'),date=val('ex-date'),valor=val('ex-val');
+  if(!valor){toast('Informe o resultado');return;}
+  S.exams.push({tipo,date,valor});save();closeSheet();toast('Exame guardado');render();
+}
+function saveCompromisso(){
+  S.agenda.push({tipo:val('cp-tipo'),date:val('cp-date'),obs:val('cp-obs')});
+  save();closeSheet();toast('Compromisso agendado');render();
+}
+function saveBio(){
+  if(!S.bio)S.bio=[];
+  const date=val('bi-date');
+  const rec={date};
+  ['gordura','massaMagra','musculo','agua','visceral','tmb'].forEach(k=>{const v=numBR(val('bi-'+k));if(v!=null)rec[k]=v;});
+  if(Object.keys(rec).length<2){toast('Preencha ao menos um valor');return;}
+  S.bio=S.bio.filter(b=>b.date!==date); S.bio.push(rec);
+  save();closeSheet();toast('Bioimpedância registrada');render();
+}
+function savePerfil(){
+  const p=S.profile;
+  p.nome=val('pf-nome')||p.nome; p.medicamento=val('pf-med'); p.doseAtual=val('pf-dose');
+  p.diaAplicacao=parseInt(val('pf-dia')); p.altura=parseInt(val('pf-altura'))||p.altura;
+  p.pesoMeta=numBR(val('pf-meta'))||p.pesoMeta; p.metaAgua=numBR(val('pf-agua'))||p.metaAgua;
+  p.metaProteina=parseInt(val('pf-prot'))||p.metaProteina;
+  save();closeSheet();toast('Configurações salvas');render();
+}
+function resetAll(){
+  if(confirm('Apagar todos os dados e recomeçar? Esta ação não pode ser desfeita.')){
+    S=null;store.set(KEY,'');go('inicio');render();
+  }
+}
+
+/* ---------- diário actions ---------- */
+function setHumor(n){todayLog().humor=n;save();render();}
+function toggleSint(s){const L=todayLog();
+  if(s==='Sem sintomas'){L.sintomas=L.sintomas.includes(s)?[]:['Sem sintomas'];}
+  else{L.sintomas=L.sintomas.filter(x=>x!=='Sem sintomas');
+    L.sintomas.includes(s)?L.sintomas=L.sintomas.filter(x=>x!==s):L.sintomas.push(s);}
+  save();render();}
+function addWater(d){const L=todayLog();L.agua=Math.max(0,+((L.agua||0)+d).toFixed(2));save();render();}
+function addProt(g){const L=todayLog();L.prot.outros=Math.max(0,(L.prot.outros||0)+g);computeProtein(L);save();render();}
+function toggleEx(e){const L=todayLog();L.exercicios.includes(e)?L.exercicios=L.exercicios.filter(x=>x!==e):L.exercicios.push(e);save();render();}
+function setApet(a){todayLog().apetite=a;save();render();}
+function setFome(f){todayLog().fomeEmocional=f;save();render();}
+
+function shareJourney(){
+  const txt=document.querySelector('.journey .q')?.innerText||'';
+  if(navigator.clipboard){navigator.clipboard.writeText(txt).then(()=>toast('Resumo copiado ✓'),()=>toast(txt));}
+  else toast('Copie o texto acima');
+}
+
+/* ---------- helpers de form ---------- */
+function val(id){const e=document.getElementById(id);return e?e.value.trim():'';}
+function numBR(s){if(!s)return null;const n=parseFloat(String(s).replace(',','.'));return isNaN(n)?null:n;}
+function downscale(file,max,cb){
+  const r=new FileReader();r.onload=e=>{const img=new Image();img.onload=()=>{
+    let{width:w,height:h}=img;const sc=Math.min(1,max/Math.max(w,h));w*=sc;h*=sc;
+    const c=document.createElement('canvas');c.width=w;c.height=h;
+    c.getContext('2d').drawImage(img,0,0,w,h);cb(c.toDataURL('image/jpeg',0.72));
+  };img.src=e.target.result;};r.readAsDataURL(file);
+}
+
+/* ---------- bind ---------- */
+function bindScreen(){}
+function bindSheet(id){
+  if(id==='aplicar'){
+    document.querySelectorAll('#bd .bmzone').forEach(z=>z.addEventListener('click',()=>{
+      tmp.local=z.dataset.local;
+      document.querySelectorAll('#bd .bmzone').forEach(x=>x.classList.remove('sel'));
+      z.classList.add('sel');
+      const t=document.getElementById('ap-localtxt');if(t)t.textContent=tmp.local;
+    }));
+  }
+}
+
+/* ============================================================
+   ONBOARDING
+   ============================================================ */
+function obView(){
+  return `<div class="ob">
+    ${logoSVG(56)}
+    <h1>Compasso</h1>
+    <p class="lead">Seu companheiro de tratamento com análogos de GLP-1. Aplicações, peso, medidas, sintomas e evolução — tudo em um diário inteligente que leva menos de um minuto por dia.</p>
+
+    <div class="card">
+      <div class="field"><label>Como podemos te chamar?</label><input id="o-nome" placeholder="Seu nome"></div>
+      <div class="field-2"><div class="field"><label>Medicamento</label>
+        <select id="o-med"><option>Mounjaro</option><option>Ozempic</option><option>Wegovy</option><option>Zepbound</option><option>Saxenda</option><option>Outro</option></select></div>
+        <div class="field"><label>Dose atual (mg)</label><input id="o-dose" placeholder="ex: 7,5" inputmode="decimal"></div></div>
+      <div class="field"><label>Dia da aplicação</label>
+        <select id="o-dia">${WD.map((d,i)=>`<option value="${i}" ${i===5?'selected':''}>${d}</option>`).join('')}</select></div>
+      <div class="field-2"><div class="field"><label>Peso inicial (kg)</label><input id="o-pini" inputmode="decimal" placeholder="ex: 96"></div>
+        <div class="field"><label>Peso meta (kg)</label><input id="o-pmeta" inputmode="decimal" placeholder="ex: 72"></div></div>
+      <div class="field-2"><div class="field"><label>Altura (cm)</label><input id="o-alt" inputmode="numeric" placeholder="ex: 165"></div>
+        <div class="field"><label>Início do tratamento</label><input type="date" id="o-data" value="${todayISO()}"></div></div>
+      <button class="btn btn-primary btn-block" onclick="startNew()">Começar minha jornada</button>
+    </div>
+    <button class="btn btn-outline btn-block" onclick="startExample()">Ver com dados de exemplo</button>
+    <p class="muted center" style="font-size:11.5px;margin-top:16px;line-height:1.5">O Compasso ajuda você a acompanhar seu tratamento, mas não substitui a orientação do seu médico ou nutricionista.</p>
+  </div>`;
+}
+function bindOb(){}
+function startNew(){
+  const nome=val('o-nome')||'Você';
+  const pini=numBR(val('o-pini')), pmeta=numBR(val('o-pmeta')), alt=parseInt(val('o-alt'));
+  if(!pini||!pmeta||!alt){toast('Preencha peso inicial, meta e altura');return;}
+  const p={nome,medicamento:val('o-med'),doseAtual:val('o-dose')||'—',unidade:'mg',
+    diaAplicacao:parseInt(val('o-dia')),dataInicio:val('o-data')||todayISO(),
+    pesoInicial:pini,pesoMeta:pmeta,altura:alt,metaAgua:3,metaProteina:100};
+  S=blankState(p);save();go('inicio');
+}
+function startExample(){S=seedExample();save();toast('Dados de exemplo carregados');go('inicio');}
+
+/* ============================================================
+   SVG · componentes
+   ============================================================ */
+function logoSVG(size=24,color='var(--green)'){
+  return `<svg class="mark" width="${size}" height="${size}" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:${size}px;height:${size}px">
+    <circle cx="20" cy="20" r="18" stroke="${color}" stroke-width="2.4"/>
+    <path d="M20 6 L24 20 L20 34 L16 20 Z" fill="${color}"/>
+    <circle cx="20" cy="20" r="3.2" fill="${color==='var(--green)'?'#fff':'var(--green-deep)'}"/>
+  </svg>`;
+}
+function ringSVG(prog,dose,unit){
+  const R=54,C=2*Math.PI*R,off=C*(1-prog);
+  return `<svg viewBox="0 0 128 128" width="128" height="128">
+    <circle cx="64" cy="64" r="${R}" fill="none" stroke="rgba(255,255,255,.22)" stroke-width="10"/>
+    <circle cx="64" cy="64" r="${R}" fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round"
+      stroke-dasharray="${C}" stroke-dashoffset="${off}" transform="rotate(-90 64 64)"/>
+    <text x="64" y="60" text-anchor="middle" class="center-dose">${esc(dose)}</text>
+    <text x="64" y="80" text-anchor="middle" class="center-unit">${esc(unit)} / semana</text>
+  </svg>`;
+}
+function dropSVG(filled,i){
+  return `<div class="drop" onclick="setWater(${i+1})"><svg viewBox="0 0 24 30">
+    <path d="M12 1 C12 1 3 12 3 19 a9 9 0 0 0 18 0 C21 12 12 1 12 1 Z"
+      fill="${filled?'var(--green)':'none'}" stroke="${filled?'var(--green)':'var(--track)'}" stroke-width="2"/></svg></div>`;
+}
+function setWater(n){const L=todayLog();L.agua=+(n*0.25).toFixed(2);save();render();}
+
+function bodyMapSVG(last,sel,selectable){
+  const zone=(id,label,d)=>{
+    const cls='bmzone'+(sel===label?' sel':'')+(last===label&&sel!==label?' last':'');
+    return `<path class="${cls}" data-local="${label}" d="${d}" ${selectable?'':`onclick="${''}"`}/>`;
+  };
+  return `<div class="bodymap"><svg viewBox="0 0 160 260">
+    <!-- corpo -->
+    <path class="bodyfill" d="M80 8 a14 14 0 0 1 14 14 a14 14 0 0 1 -6 11 l6 6 q14 4 16 22 l4 40 q1 8 -4 9 q-6 1 -8 -7 l-4 -28 l-2 60 l4 70 q1 8 -6 8 q-6 0 -7 -8 l-5 -55 l-5 55 q-1 8 -7 8 q-7 0 -6 -8 l4 -70 l-2 -60 l-4 28 q-2 8 -8 7 q-5 -1 -4 -9 l4 -40 q2 -18 16 -22 l6 -6 a14 14 0 0 1 -6 -11 a14 14 0 0 1 14 -14 Z"/>
+    <!-- zonas -->
+    ${zone('abd','Abdômen','M64 92 h32 v28 h-32 Z')}
+    ${zone('brD','Braço direito','M40 70 h14 v34 h-14 Z')}
+    ${zone('brE','Braço esquerdo','M106 70 h14 v34 h-14 Z')}
+    ${zone('cxD','Coxa direita','M62 135 h16 v40 h-16 Z')}
+    ${zone('cxE','Coxa esquerda','M82 135 h16 v40 h-16 Z')}
+    <text x="80" y="106" text-anchor="middle" font-size="9" font-weight="700" fill="var(--green-deep)" pointer-events="none">Abd.</text>
+  </svg></div>`;
+}
+
+/* ============================================================
+   SVG · gráfico de linha
+   ============================================================ */
+function lineChart(data,goal){
+  if(!data||data.length<2) return '<p class="muted center" style="font-size:13px;padding:16px 0">Registre mais de uma pesagem para ver o gráfico.</p>';
+  const W=360,H=150,pL=8,pR=8,pT=14,pB=20;
+  const hasGoal=goal!=null&&isFinite(goal);
+  const ys=data.map(d=>d.y); let min=Math.min(...ys,hasGoal?goal:Infinity), max=Math.max(...ys,hasGoal?goal:-Infinity);
+  const range=(max-min)||1; min-=range*0.12; max+=range*0.12;
+  const X=i=>pL+(i/(data.length-1))*(W-pL-pR);
+  const Y=v=>pT+(1-(v-min)/(max-min))*(H-pT-pB);
+  let path=data.map((d,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(d.y).toFixed(1)).join(' ');
+  let area=path+` L ${X(data.length-1)} ${H-pB} L ${X(0)} ${H-pB} Z`;
+  const gy=Y(goal);
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block;margin-top:4px">
+    <defs><linearGradient id="ga" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--green)" stop-opacity=".22"/><stop offset="1" stop-color="var(--green)" stop-opacity="0"/></linearGradient></defs>
+    ${hasGoal&&goal>min&&goal<max?`<line x1="${pL}" y1="${gy}" x2="${W-pR}" y2="${gy}" stroke="var(--amber)" stroke-width="1.4" stroke-dasharray="4 4"/>
+      <text x="${W-pR}" y="${gy-4}" text-anchor="end" font-size="9" font-weight="700" fill="var(--amber)">meta ${nf(goal)}</text>`:''}
+    <path d="${area}" fill="url(#ga)"/>
+    <path d="${path}" fill="none" stroke="var(--green)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    ${data.map((d,i)=>`<circle cx="${X(i)}" cy="${Y(d.y)}" r="${i===data.length-1?4:2.5}" fill="${i===data.length-1?'var(--green-deep)':'var(--green)'}" stroke="#fff" stroke-width="1.5"/>`).join('')}
+    <text x="${X(0)}" y="${H-5}" font-size="9" fill="var(--ink-faint)">${fmtBR(data[0].x)}</text>
+    <text x="${X(data.length-1)}" y="${H-5}" text-anchor="end" font-size="9" fill="var(--ink-faint)">${fmtBR(data[data.length-1].x)}</text>
+  </svg>`;
+}
+
+/* ============================================================
+   ÍCONES (SVG inline)
+   ============================================================ */
+function icon(name,white,flip){
+  const c=white?'#fff':'currentColor';const s=`width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+  const P={
+    home:'<path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/>',
+    syringe:'<path d="M18 2l4 4"/><path d="M15 5l4 4"/><path d="M4 20l9-9 3 3-9 9H4v-3z" transform="translate(-1 -1)"/><path d="M8.5 15.5l-3-3"/>',
+    chart:'<path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 15l3-4 3 2 4-6"/>',
+    book:'<path d="M5 4h11a2 2 0 0 1 2 2v14"/><path d="M5 4v16h13"/><path d="M5 4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2"/>',
+    grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    plus:'<path d="M12 5v14M5 12h14"/>',
+    scale:'<path d="M12 3v3"/><rect x="4" y="6" width="16" height="15" rx="3"/><circle cx="12" cy="13" r="3"/><path d="M12 13l2-2"/>',
+    spark:'<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
+    gear:'<circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/>',
+    medal:'<circle cx="12" cy="15" r="6"/><path d="M8.5 9.5L6 3h12l-2.5 6.5"/><path d="M12 13l1 2h-2z" fill="'+c+'"/>',
+    clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    calc:'<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8 11h2M12 11h2M16 11h0M8 15h2M12 15h2M8 18h6"/>',
+    flask:'<path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/><path d="M7.5 15h9"/>',
+    cal:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/>',
+    chevron:'<path d="M9 6l6 6-6 6"/>',
+    check:'<path d="M20 6L9 17l-5-5"/>',
+    flag:'<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+    drop:'<path d="M12 3s6 7 6 11a6 6 0 0 1-12 0c0-4 6-11 6-11z"/>',
+    alert:'<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 2.5 18a2 2 0 0 0 1.7 3h15.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>',
+    share:'<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>',
+    pulse:'<path d="M3 12h4l2-6 4 12 2-6h6"/>',
+    steth:'<path d="M6 3v6a4 4 0 0 0 8 0V3"/><path d="M10 16a5 5 0 0 0 5 5 4 4 0 0 0 4-4v-2"/><circle cx="19" cy="11" r="2"/>',
+    doc:'<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M10 13h6M10 17h6"/>',
+    eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    down:'<path d="M12 4v11"/><path d="M7 11l5 5 5-5"/><path d="M5 20h14"/>',
+    scale2:'<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9l3-3 3 3"/>',
+  };
+  return `<svg ${s} style="${flip?'transform:scaleX(-1)':''}">${P[name]||''}</svg>`;
+}
+
+/* ============================================================
+   META PROTEICA · fontes de proteína animal (estimativas)
+   ============================================================ */
+const PROT=[
+  {id:'ovo',    emoji:'🥚', nome:'Ovos',         mode:'unit', per:6},
+  {id:'frango', emoji:'🍗', nome:'Frango',       mode:'g',  per100:30},
+  {id:'carne',  emoji:'🥩', nome:'Carne bovina', mode:'g',  per100:26},
+  {id:'peixe',  emoji:'🐟', nome:'Peixe',        mode:'g',  per100:22},
+  {id:'queijo', emoji:'🧀', nome:'Queijo',       mode:'g',  per100:22, unit:{label:'fatia',g:20}},
+  {id:'iogurte',emoji:'🥣', nome:'Iogurte',      mode:'g',  per100:4,  unit:{label:'pote',g:170}},
+  {id:'leite',  emoji:'🥛', nome:'Leite',        mode:'ml', per100:3.3,unit:{label:'copo',g:200}},
+];
+let protOpen='ovo';
+function protGrams(id,qty){const s=PROT.find(p=>p.id===id);if(!s||!qty)return 0;
+  return s.mode==='unit'?qty*s.per:qty/100*s.per100;}
+function computeProtein(L){let t=0;PROT.forEach(s=>{t+=protGrams(s.id,L.prot[s.id]||0);});t+=(L.prot.outros||0);L.proteina=Math.round(t);return L.proteina;}
+function setProt(id,qty){const L=todayLog();L.prot[id]=Math.max(0,+qty||0);computeProtein(L);save();render();}
+function addProtQty(id,d){const L=todayLog();L.prot[id]=Math.max(0,(L.prot[id]||0)+d);computeProtein(L);save();render();}
+function commitProt(id,v){setProt(id,numBR(v)||0);}
+function toggleProtCard(id){protOpen=protOpen===id?null:id;render();}
+
+function proteinBar(cur,goal){const n=10,f=Math.round(Math.min(1,goal?cur/goal:0)*n);
+  let s='';for(let i=0;i<n;i++)s+=`<span class="psq ${i<f?'on':''}"></span>`;return `<div class="psqrow">${s}</div>`;}
+
+function eggControl(L){
+  const q=L.prot.ovo||0; let dots='';
+  for(let i=0;i<12;i++)dots+=`<button class="egg ${i<q?'on':''}" onclick="setProt('ovo',${i+1===q?i:i+1})" aria-label="ovo ${i+1}">🥚</button>`;
+  return `<div class="eggrow">${dots}</div>
+    <div class="protresult"><b>${q} ${q===1?'ovo':'ovos'}</b> ≈ ${q*6} g de proteína</div>
+    <div class="row" style="gap:8px;margin-top:10px">
+      <button class="btn btn-outline btn-sm" style="flex:0 0 64px" onclick="addProtQty('ovo',-1)">−</button>
+      <button class="btn btn-ghost btn-sm" style="flex:1" onclick="addProtQty('ovo',1)">+ 1 ovo</button></div>`;
+}
+function gramControl(s,L){
+  const q=L.prot[s.id]||0, u=s.mode==='ml'?'ml':'g';
+  const quick=s.mode==='ml'?[100,200]:[50,100,150];
+  return `<div class="field" style="margin:0 0 10px"><label>Quantidade (${u})</label>
+    <input inputmode="decimal" value="${q||''}" onchange="commitProt('${s.id}',this.value)" placeholder="ex: ${s.mode==='ml'?'200':'120'}"></div>
+    <div class="chips" style="margin-bottom:12px">
+      ${quick.map(g=>`<button class="chip" onclick="addProtQty('${s.id}',${g})">+ ${g} ${u}</button>`).join('')}
+      ${s.unit?`<button class="chip" onclick="addProtQty('${s.id}',${s.unit.g})">+ 1 ${s.unit.label}</button>`:''}
+      ${q?`<button class="chip" onclick="setProt('${s.id}',0)">zerar</button>`:''}
+    </div>
+    <div class="protresult">${q?`${nf(q,0)} ${u} ≈ <b>${Math.round(protGrams(s.id,q))} g</b> de proteína`:'Adicione a quantidade consumida'}</div>`;
+}
+function outrosControl(L){
+  const q=L.prot.outros||0;
+  return `<div class="field" style="margin:0 0 10px"><label>Proteína de outras fontes (g)</label>
+    <input inputmode="numeric" value="${q||''}" onchange="commitProt('outros',this.value)" placeholder="whey, leguminosas, tofu…"></div>
+    <div class="chips" style="margin-bottom:12px">${[10,20,30].map(g=>`<button class="chip" onclick="addProtQty('outros',${g})">+ ${g} g</button>`).join('')}
+      ${q?`<button class="chip" onclick="setProt('outros',0)">zerar</button>`:''}</div>
+    <div class="protresult">${q?`<b>${q} g</b> de outras fontes`:'Whey, leguminosas, tofu, suplementos…'}</div>`;
+}
+function proteinaView(){
+  const L=todayLog(), goal=S.profile.metaProteina, cur=L.proteina||0;
+  const pct=Math.round(Math.min(100,cur/goal*100));
+  const card=s=>{const q=L.prot[s.id]||0, g=Math.round(protGrams(s.id,q)), open=protOpen===s.id;
+    const qtxt=q?(s.mode==='unit'?q+' un':nf(q,0)+(s.mode==='ml'?' ml':' g')):'';
+    return `<div class="card protcard ${open?'open':''}">
+      <div class="between" onclick="toggleProtCard('${s.id}')">
+        <div class="row"><span class="pemoji">${s.emoji}</span>
+          <div><div style="font-weight:800">${s.nome}</div>
+          <div class="muted" style="font-size:12px">${q?qtxt+' · '+g+' g proteína':'toque para adicionar'}</div></div></div>
+        <span class="row" style="gap:2px;font-weight:800;color:var(--green)">${g?g+' g':''}${icon('chevron')}</span>
+      </div>
+      ${open?`<div class="protbody">${s.id==='ovo'?eggControl(L):gramControl(s,L)}</div>`:''}
+    </div>`;};
+  const outQ=L.prot.outros||0;
+  return `
+  <button class="btn btn-outline btn-sm" onclick="go('diario')" style="margin-bottom:12px">${icon('chevron',false,true)} Diário</button>
+  <div class="scr-title" style="margin-bottom:4px">Meta proteica</div>
+  <div class="scr-sub">Toque nas fontes que você comeu hoje. O app estima a proteína, sem precisar pesar tudo.</div>
+
+  <div class="protsummary">
+    <div style="font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;opacity:.85;font-weight:700">Proteína consumida hoje</div>
+    <div style="font-size:34px;font-weight:800;letter-spacing:-.02em;margin:2px 0">${cur} <span style="font-size:16px;opacity:.85">/ ${goal} g</span></div>
+    ${proteinBar(cur,goal)}
+    <div style="font-size:13px;opacity:.9;margin-top:6px">${pct}% da meta atingida${cur>=goal?' ✓':''}</div>
+  </div>
+
+  ${PROT.map(card).join('')}
+
+  <div class="card protcard ${protOpen==='outros'?'open':''}">
+    <div class="between" onclick="toggleProtCard('outros')">
+      <div class="row"><span class="pemoji">➕</span>
+        <div><div style="font-weight:800">Outras fontes</div>
+        <div class="muted" style="font-size:12px">${outQ?outQ+' g proteína':'whey, leguminosas, tofu…'}</div></div></div>
+      <span class="row" style="gap:2px;font-weight:800;color:var(--green)">${outQ?outQ+' g':''}${icon('chevron')}</span>
+    </div>
+    ${protOpen==='outros'?`<div class="protbody">${outrosControl(L)}</div>`:''}
+  </div>
+
+  <p class="muted center" style="font-size:11.5px;margin-top:6px;line-height:1.5">Valores médios por fonte de proteína animal. São estimativas para acompanhamento, não uma pesagem exata.</p>`;
+}
+
+/* ============================================================
+   BIOIMPEDÂNCIA · composição corporal
+   ============================================================ */
+const BIOM=[
+  {id:'gordura',   nome:'Gordura corporal',  un:'%',    better:'down'},
+  {id:'massaMagra',nome:'Massa magra',       un:'kg',   better:'up'},
+  {id:'musculo',   nome:'Massa muscular',    un:'kg',   better:'up'},
+  {id:'agua',      nome:'Água corporal',     un:'%',    better:'up'},
+  {id:'visceral',  nome:'Gordura visceral',  un:'',     better:'down'},
+  {id:'tmb',       nome:'Metabolismo basal', un:'kcal', better:'up'},
+];
+function fmtBio(v,un){if(un==='kcal')return nf(v,0);return v%1===0?nf(v,0):nf(v,1);}
+function bioView(){
+  if(!S.bio)S.bio=[];
+  const b=[...S.bio].sort((x,y)=>x.date<y.date?-1:1);
+  if(!b.length) return `<div class="scr-title" style="margin-bottom:6px">Bioimpedância</div>
+    <div class="scr-sub">Acompanhe sua composição corporal: gordura, massa magra e água ao longo do tratamento.</div>
+    <div class="card center"><div style="font-size:36px">🧬</div>
+      <p class="muted" style="font-size:13px;margin:8px 0 14px">Nenhuma medição ainda. Registre a primeira para começar a ver a evolução.</p>
+      <button class="btn btn-primary btn-block" onclick="openSheet('bio')">${icon('plus',true)} Registrar bioimpedância</button></div>`;
+  const first=b[0], last=b[b.length-1];
+  const fatData=b.filter(x=>x.gordura!=null).map(x=>({x:x.date,y:x.gordura}));
+  const leanData=b.filter(x=>x.massaMagra!=null).map(x=>({x:x.date,y:x.massaMagra}));
+  return `<div class="scr-title" style="margin-bottom:6px">Bioimpedância</div>
+  <div class="scr-sub">Última medição em ${fmtBRy(last.date)} · ${b.length} registro(s).</div>
+
+  <div class="biggrid">
+    ${BIOM.map(m=>{if(last[m.id]==null)return'';
+      const d=first[m.id]!=null?+(last[m.id]-first[m.id]).toFixed(1):null;
+      const good=d==null?false:(m.better==='down'?d<0:d>0);
+      return `<div class="stat"><div class="k">${m.nome}</div>
+        <div class="v" style="font-size:21px">${fmtBio(last[m.id],m.un)}<small> ${m.un}</small></div>
+        ${d!=null&&d!==0?`<span class="delta ${good?'down':'up'}">${d>0?'+':'−'}${fmtBio(Math.abs(d),m.un)} ${m.un}</span>`:''}</div>`;
+    }).join('')}
+  </div>
+
+  ${fatData.length>=2?`<div class="card tight"><div class="eyebrow">Gordura corporal (%)</div>${lineChart(fatData,null)}</div>`:''}
+  ${leanData.length>=2?`<div class="card tight"><div class="eyebrow">Massa magra (kg)</div>${lineChart(leanData,null)}</div>`:''}
+
+  <button class="btn btn-primary btn-block" onclick="openSheet('bio')">${icon('plus',true)} Nova medição</button>
+
+  <div class="card mt14"><h3>Histórico</h3><div class="list">
+    ${[...b].reverse().map(r=>`<div class="item"><div class="badge-ico">${icon('pulse')}</div>
+      <div><div class="t">${fmtBRy(r.date)}</div><div class="s">${[r.gordura!=null?nf(r.gordura)+'% gordura':'',r.massaMagra!=null?nf(r.massaMagra)+' kg magra':''].filter(Boolean).join(' · ')||'—'}</div></div></div>`).join('')}
+  </div></div>`;
+}
+
+/* ============================================================
+   RELATÓRIO DE EVOLUÇÃO · tela de seleção + gerador de PDF
+   O PDF é gerado 100% no browser via Canvas, temporário e
+   descartado ao fechar a tela. Zero persistência no servidor.
+   ============================================================ */
+
+/* ----- estado do relatório ----- */
+let RPeriodo='30d', RDataIni='', RDataFim='', RGerado=false;
+
+function relatorioView(){
+  const hoje=todayISO();
+  const opt=[['7d','Últimos 7 dias','📅'],['15d','Últimos 15 dias','📅'],
+    ['30d','Últimos 30 dias','📅'],['custom','Período personalizado','✏️']];
+  return `
+  <div class="scr-title" style="margin-bottom:4px">Exportar Relatório</div>
+  <div class="scr-sub">Selecione o período e gere um PDF da sua evolução para compartilhar com sua equipe de saúde.</div>
+
+  <div class="card">
+    <h3>Selecione o período</h3>
+    ${opt.map(([id,lbl,ic])=>`<button class="periodo-btn ${RPeriodo===id?'sel':''}" onclick="setPeriodo('${id}')">${ic} ${lbl}</button>`).join('')}
+    ${RPeriodo==='custom'?`
+    <div class="field-2 mt8">
+      <div class="field"><label>Data inicial</label><input type="date" id="r-ini" value="${RDataIni||todayISOback(30)}" onchange="RDataIni=this.value"></div>
+      <div class="field"><label>Data final</label><input type="date" id="r-fim" value="${RDataFim||hoje}" onchange="RDataFim=this.value"></div>
+    </div>`:''}
+    <button class="btn btn-primary btn-block" style="font-size:15px;padding:16px;margin-top:14px" onclick="gerarRelatorio()">
+      ${icon('doc',true)} Gerar Relatório
+    </button>
+  </div>
+  <p class="muted center" style="font-size:11.5px;margin-top:4px;line-height:1.5">O relatório é gerado no seu dispositivo. Nenhum arquivo é salvo automaticamente.</p>`;
+}
+
+function setPeriodo(id){
+  RPeriodo=id;
+  if(id!=='custom'){RDataIni='';RDataFim='';}
+  go('mais','relatorio');
+}
+
+function todayISOback(n){const d=new Date();d.setDate(d.getDate()-n);return todayISO(d);}
+
+function periodoRange(){
+  const hoje=todayISO();
+  if(RPeriodo==='7d')  return{ini:todayISOback(6), fim:hoje};
+  if(RPeriodo==='15d') return{ini:todayISOback(14),fim:hoje};
+  if(RPeriodo==='30d') return{ini:todayISOback(29),fim:hoje};
+  const ri=document.getElementById('r-ini'), rf=document.getElementById('r-fim');
+  const ini=ri?ri.value:RDataIni, fim=rf?rf.value:RDataFim;
+  return{ini:ini||todayISOback(29), fim:fim||hoje};
+}
+
+/* -------- coleta de dados do período -------- */
+function coletaDados(ini,fim){
+  const inRange=d=>d>=ini&&d<=fim;
+  const w=sortedWeigh().filter(x=>inRange(x.date));
+  const apps=S.applications.filter(x=>inRange(x.date)).sort((a,b)=>a.date<b.date?-1:1);
+  const logs=Object.entries(S.dailyLogs).filter(([d])=>inRange(d)).map(([d,l])=>({date:d,...l})).sort((a,b)=>a.date<b.date?-1:1);
+  const bio=(S.bio||[]).filter(x=>inRange(x.date)).sort((a,b)=>a.date<b.date?-1:1);
+  const exams=S.exams.filter(x=>inRange(x.date));
+  // peso início/fim do período
+  const allW=sortedWeigh();
+  const pesoIniPeriod=w.length?w[0].peso:(allW.length?allW[0].peso:S.profile.pesoInicial);
+  const pesoFimPeriod=w.length?w[w.length-1].peso:currentWeight();
+  const varPeso=+(pesoFimPeriod-pesoIniPeriod).toFixed(1);
+  // hidratação
+  const diasAgua=logs.filter(l=>l.agua>0);
+  const mediaAgua=diasAgua.length?+(diasAgua.reduce((s,l)=>s+l.agua,0)/diasAgua.length).toFixed(1):0;
+  const metaAguaAtingida=diasAgua.filter(l=>l.agua>=S.profile.metaAgua).length;
+  // proteína
+  const diasProt=logs.filter(l=>l.proteina>0);
+  const mediaProt=diasProt.length?Math.round(diasProt.reduce((s,l)=>s+l.proteina,0)/diasProt.length):0;
+  const adesaoProt=S.profile.metaProteina?Math.round(mediaProt/S.profile.metaProteina*100):0;
+  // sintomas
+  const contSint={};
+  logs.forEach(l=>(l.sintomas||[]).filter(s=>s!=='Sem sintomas').forEach(s=>{contSint[s]=(contSint[s]||0)+1;}));
+  // humor médio
+  const diasHumor=logs.filter(l=>l.humor>0);
+  const mediaHumor=diasHumor.length?+(diasHumor.reduce((s,l)=>s+l.humor,0)/diasHumor.length).toFixed(1):0;
+  // apetite
+  const aOrd=['Muito baixo','Baixo','Normal','Alto','Muito alto'];
+  const contAp={};logs.forEach(l=>{if(l.apetite)contAp[l.apetite]=(contAp[l.apetite]||0)+1;});
+  const apetiteDom=Object.entries(contAp).sort((a,b)=>b[1]-a[1])[0]?.[0]||'';
+  // próxima aplicação
+  const na=nextAppInfo();
+  const lastAppObj=lastApp();
+  return{w,apps,logs,bio,exams,pesoIniPeriod,pesoFimPeriod,varPeso,
+    mediaAgua,metaAguaAtingida,diasTotal:logs.length,mediaProt,adesaoProt,
+    contSint,mediaHumor,apetiteDom,na,lastAppObj};
+}
+
+/* -------- resumo automático -------- */
+function gerarResumo(d,ini,fim){
+  const dias=daysBetween(ini,fim)+1;
+  const partes=[];
+  if(d.varPeso<0) partes.push(`houve uma redução de ${nf(Math.abs(d.varPeso))} kg no peso durante o período`);
+  else if(d.varPeso===0) partes.push('o peso se manteve estável no período');
+  else partes.push(`o peso variou +${nf(d.varPeso)} kg no período`);
+  if(d.mediaAgua>=S.profile.metaAgua*0.85) partes.push('a hidratação foi satisfatória');
+  else if(d.mediaAgua>0) partes.push('a hidratação ficou abaixo da meta diária');
+  if(d.adesaoProt>=90) partes.push('a meta proteica foi bem atendida');
+  else if(d.adesaoProt>=70) partes.push('a ingestão proteica ficou próxima da meta');
+  else if(d.adesaoProt>0) partes.push('a ingestão proteica esteve abaixo da meta');
+  const nSint=Object.values(d.contSint).reduce((s,v)=>s+v,0);
+  if(nSint===0) partes.push('nenhum sintoma foi registrado');
+  else if(nSint<=3) partes.push('os sintomas registrados foram leves e ocasionais');
+  else partes.push('foram registrados alguns sintomas ao longo do período');
+  if(d.apps.length>0) partes.push(`foram realizadas ${d.apps.length} aplicação(ões) de ${esc(S.profile.medicamento)}`);
+  let txt=`Durante o período analisado (${fmtBRy(ini)} a ${fmtBRy(fim)}), `;
+  txt+=partes.join(', ')+'. ';
+  txt+='Este relatório foi gerado automaticamente a partir dos registros do paciente e não substitui a avaliação do médico ou nutricionista responsável.';
+  return txt;
+}
+
+/* -------- linha do tempo de eventos -------- */
+function gerarTimeline(d,ini,fim){
+  const evs=[];
+  d.apps.forEach(a=>evs.push({date:a.date,txt:`Aplicação de ${esc(a.dose)} ${esc(S.profile.unidade)} (${esc(a.local)})`}));
+  d.w.forEach(pw=>evs.push({date:pw.date,txt:`Peso registrado: ${nf(pw.peso)} kg`}));
+  d.bio.forEach(b=>evs.push({date:b.date,txt:'Bioimpedância realizada'}));
+  d.logs.forEach(l=>{
+    const sint=(l.sintomas||[]).filter(s=>s!=='Sem sintomas');
+    if(sint.length) evs.push({date:l.date,txt:'Sintomas: '+sint.join(', ')});
+    if(l.agua>=S.profile.metaAgua) evs.push({date:l.date,txt:'Meta de hidratação atingida'});
+    if(l.proteina>=S.profile.metaProteina) evs.push({date:l.date,txt:'Meta proteica atingida'});
+  });
+  // deduplica por data+txt
+  const seen=new Set(), out=[];
+  evs.sort((a,b)=>a.date<b.date?-1:1).forEach(e=>{const k=e.date+'|'+e.txt;if(!seen.has(k)){seen.add(k);out.push(e);}});
+  return out;
+}
+
+/* ============================================================
+   GERADOR PDF CANVAS · A4 retrato, unidades em pontos (pt)
+   Canvas nativo, sem bibliotecas externas.
+   ============================================================ */
+function gerarRelatorio(){
+  const{ini,fim}=periodoRange();
+  if(ini>fim){toast('A data inicial deve ser anterior à final');return;}
+  toast('Gerando relatório…');
+  setTimeout(()=>{
+    try{
+      const d=coletaDados(ini,fim);
+      const html=buildPDF(d,ini,fim);
+      mostrarPreview(html,ini,fim);
+    }catch(e){
+      console.error(e);
+      toast('Erro ao gerar relatório. Tente novamente.');
+    }
+  },80);
+}
+
+/* ---- buildSections: monta as seções lógicas do relatório ---- */
+function buildSections(d,ini,fim){
+  const p=S.profile;
+  const na=d.na;
+  const falta=+(currentWeight()-p.pesoMeta).toFixed(1);
+  const sec=[];
+
+  sec.push({type:'header',paciente:p.nome,periodo:`${fmtBRy(ini)} a ${fmtBRy(fim)}`,
+    emissao:fmtBRy(todayISO()),diasPeriodo:daysBetween(ini,fim)+1});
+
+  sec.push({type:'section',title:'Medicação'});
+  sec.push({type:'kv2',rows:[
+    ['Medicamento',esc(p.medicamento),'Dose atual',esc(p.doseAtual)+' '+esc(p.unidade)],
+    ['Frequência','1× por semana','Aplicações no período',String(d.apps.length)],
+    ['Última aplicação',d.lastAppObj?fmtBRy(d.lastAppObj.date):'—','Próxima aplicação',na.days===0?'Hoje':WD[p.diaAplicacao]+', '+fmtBRy(na.date)],
+  ]});
+
+  sec.push({type:'section',title:'Evolução do peso'});
+  sec.push({type:'peso3',ini:nf(d.pesoIniPeriod),fim:nf(d.pesoFimPeriod),var:d.varPeso});
+  sec.push({type:'kv2',rows:[
+    ['Peso inicial do tratamento',nf(p.pesoInicial)+' kg','Peso atual',nf(d.pesoFimPeriod)+' kg'],
+    ['Peso meta',nf(p.pesoMeta)+' kg','Falta para a meta',falta>0?nf(falta)+' kg':'✓ Meta atingida'],
+  ]});
+  if(d.w.length>=2) sec.push({type:'lineChart',data:d.w.map(w=>({x:w.date,y:w.peso})),goal:p.pesoMeta});
+
+  if(d.diasTotal>0){
+    sec.push({type:'section',title:'Hidratação'});
+    sec.push({type:'kv2',rows:[
+      ['Meta diária',nf(p.metaAgua)+' L','Média diária registrada',nf(d.mediaAgua)+' L'],
+      ['Dias com meta atingida',d.metaAguaAtingida+' de '+d.diasTotal,'Dias registrados',String(d.diasTotal)],
+    ]});
+  }
+
+  if(d.mediaProt>0){
+    sec.push({type:'section',title:'Meta Proteica'});
+    sec.push({type:'protBar',meta:p.metaProteina,media:d.mediaProt,adesao:d.adesaoProt});
+  }
+
+  const diasHumor=d.logs.filter(l=>l.humor>0);
+  if(diasHumor.length>0){
+    sec.push({type:'section',title:'Check-in'});
+    const H=['','Muito baixo','Baixo','Moderado','Bom','Muito bom'];
+    const rows=[];
+    if(d.mediaHumor>0) rows.push(['Humor médio',H[Math.round(d.mediaHumor)]||'—']);
+    if(d.apetiteDom)    rows.push(['Apetite predominante',d.apetiteDom]);
+    sec.push({type:'kv1',rows});
+  }
+
+  sec.push({type:'section',title:'Sintomas'});
+  const sintomasTodos=['Náusea','Azia','Vômito','Constipação','Diarreia','Dor de cabeça','Fadiga','Gases'];
+  const comSint=sintomasTodos.filter(s=>d.contSint[s]>0).map(s=>[s,d.contSint[s]+' dia(s)']);
+  if(comSint.length===0) sec.push({type:'empty',msg:'Nenhum sintoma registrado no período.'});
+  else sec.push({type:'kv1',rows:comSint});
+
+  if(d.bio&&d.bio.length>=2){
+    sec.push({type:'section',title:'Bioimpedância — Comparativo'});
+    const bf=d.bio[0],bl=d.bio[d.bio.length-1];
+    const bfields=[['gordura','Gordura corporal','%'],['massaMagra','Massa magra','kg'],
+      ['musculo','Massa muscular','kg'],['agua','Água corporal','%'],
+      ['visceral','Gordura visceral',''],['tmb','Metabolismo basal','kcal']];
+    const brows=[];
+    bfields.forEach(([k,lbl,u])=>{if(bf[k]!=null||bl[k]!=null)
+      brows.push([lbl,(bf[k]!=null?nf(bf[k])+' '+u:'—')+' → '+(bl[k]!=null?nf(bl[k])+' '+u:'—')]);});
+    sec.push({type:'bio2',rows:brows,datas:[fmtBRy(bf.date),fmtBRy(bl.date)]});
+  } else if(d.bio&&d.bio.length===1){
+    sec.push({type:'section',title:'Bioimpedância'});
+    const b=d.bio[0];const rows=[];
+    if(b.gordura!=null)   rows.push(['Gordura corporal',nf(b.gordura)+'%']);
+    if(b.massaMagra!=null)rows.push(['Massa magra',nf(b.massaMagra)+' kg']);
+    if(b.musculo!=null)   rows.push(['Massa muscular',nf(b.musculo)+' kg']);
+    if(b.visceral!=null)  rows.push(['Gordura visceral',String(b.visceral)]);
+    if(b.tmb!=null)       rows.push(['Metabolismo basal',nf(b.tmb,0)+' kcal']);
+    sec.push({type:'kv1',rows,note:'Apenas 1 registro no período — comparativo indisponível.'});
+  }
+
+  const tl=gerarTimeline(d,ini,fim);
+  if(tl.length){
+    sec.push({type:'section',title:'Linha do tempo'});
+    sec.push({type:'timeline',events:tl.slice(0,20)});
+  }
+
+  sec.push({type:'section',title:'Resumo automático'});
+  sec.push({type:'resumo',text:gerarResumo(d,ini,fim)});
+  sec.push({type:'footer'});
+  return sec;
+}
+
+/* ============================================================
+   buildPDF + mostrarPreview · HTML com @media print A4
+   Abre numa nova aba; window.print() gera PDF A4 perfeito.
+   ============================================================ */
+function buildPDF(d,ini,fim){
+  const p=S.profile;
+  const na=d.na;
+  const falta=+(currentWeight()-p.pesoMeta).toFixed(1);
+  const adesaoProt=d.mediaProt>0?Math.round(d.mediaProt/S.profile.metaProteina*100):0;
+  const H=['','Muito baixo','Baixo','Moderado','Bom','Muito bom'];
+  const diasHumor=d.logs.filter(l=>l.humor>0);
+  const sintomasTodos=['Náusea','Azia','Vômito','Constipação','Diarreia','Dor de cabeça','Fadiga','Gases'];
+  const comSint=sintomasTodos.filter(s=>d.contSint[s]>0);
+  const tl=gerarTimeline(d,ini,fim);
+
+  /* gráfico SVG inline */
+  function sparkSVG(weighings){
+    if(weighings.length<2) return '';
+    const W=480,H=90,pl=36,pr=8,pt=14,pb=22;
+    const ys=weighings.map(w=>w.peso);
+    const goal=p.pesoMeta;
+    const mn=Math.min(...ys,goal)-0.5, mx=Math.max(...ys)+0.5, rng=(mx-mn)||1;
+    const X=i=>pl+(i/(weighings.length-1))*(W-pl-pr);
+    const Y=v=>pt+(1-(v-mn)/rng)*(H-pt-pb);
+    const path=weighings.map((w,i)=>(i?'L':'M')+X(i).toFixed(1)+','+Y(w.peso).toFixed(1)).join(' ');
+    const area=path+` L${X(weighings.length-1).toFixed(1)},${(H-pb).toFixed(1)} L${X(0).toFixed(1)},${(H-pb).toFixed(1)} Z`;
+    const gy=Y(goal);
+    /* y-axis labels */
+    const yLabels=[mn,mn+(mx-mn)/2,mx].map(v=>{
+      const cy=Y(v);
+      return `<text x="${pl-4}" y="${cy+4}" text-anchor="end" font-size="8" fill="#8AA097" font-family="Arial">${nf(v)}</text>
+<line x1="${pl}" y1="${cy}" x2="${W-pr}" y2="${cy}" stroke="#E4E9E0" stroke-width="0.8"/>`;
+    }).join('');
+    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block;margin:8px 0">
+      <defs><linearGradient id="rg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#1F7A5C" stop-opacity=".15"/>
+        <stop offset="1" stop-color="#1F7A5C" stop-opacity="0"/></linearGradient></defs>
+      ${yLabels}
+      ${goal>mn&&goal<mx?`<line x1="${pl}" y1="${gy.toFixed(1)}" x2="${W-pr}" y2="${gy.toFixed(1)}" stroke="#D99A2B" stroke-width="1.2" stroke-dasharray="5,3"/>
+        <text x="${W-pr}" y="${(gy-3).toFixed(1)}" text-anchor="end" font-size="8" fill="#D99A2B" font-family="Arial">meta ${nf(goal)}</text>`:''}
+      <path d="${area}" fill="url(#rg)"/>
+      <polyline points="${weighings.map((w,i)=>X(i).toFixed(1)+','+Y(w.peso).toFixed(1)).join(' ')}" fill="none" stroke="#1F7A5C" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${weighings.map((w,i)=>`<circle cx="${X(i).toFixed(1)}" cy="${Y(w.peso).toFixed(1)}" r="${i===weighings.length-1?3.5:2}" fill="${i===weighings.length-1?'#12604A':'#1F7A5C'}" stroke="#fff" stroke-width="1.2"/>`).join('')}
+      <text x="${X(0).toFixed(1)}" y="${H-4}" font-size="8" fill="#8AA097" font-family="Arial">${fmtBR(weighings[0].date)}</text>
+      <text x="${X(weighings.length-1).toFixed(1)}" y="${H-4}" text-anchor="end" font-size="8" fill="#8AA097" font-family="Arial">${fmtBR(weighings[weighings.length-1].date)}</text>
+    </svg>`;
+  }
+
+  /* bioimpedância */
+  function bioSec(){
+    if(!d.bio||!d.bio.length) return '';
+    const bf=d.bio[0], bl=d.bio[d.bio.length-1];
+    const fields=[['gordura','Gordura corporal','%'],['massaMagra','Massa magra','kg'],
+      ['musculo','Massa muscular','kg'],['agua','Água corporal','%'],
+      ['visceral','Gordura visceral',''],['tmb','Metabolismo basal','kcal']];
+    const rows=fields.filter(([k])=>bf[k]!=null||bl[k]!=null).map(([k,lbl,u])=>`
+      <tr>
+        <td>${lbl}</td>
+        <td style="text-align:center">${bf[k]!=null?nf(bf[k])+' '+u:'—'}</td>
+        <td style="text-align:center;font-weight:700;color:${bl[k]!=null&&bf[k]!=null&&bl[k]<bf[k]?'#1F7A5C':'#14352E'}">${bl[k]!=null?nf(bl[k])+' '+u:'—'}</td>
+      </tr>`).join('');
+    if(!rows) return '';
+    const nota=d.bio.length>=2?`${fmtBRy(bf.date)} → ${fmtBRy(bl.date)}`:`1 registro em ${fmtBRy(bf.date)}`;
+    return `<div class="sec">
+      <div class="sh">Bioimpedância</div>
+      <p class="nota">${nota}</p>
+      <table><thead><tr><th style="text-align:left">Indicador</th><th>Inicial</th><th>Atual</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  }
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compasso · Relatório · ${esc(p.nome)}</title>
+<style>
+/* ── reset ── */
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{font-family:Arial,Helvetica,sans-serif;font-size:9.5pt;color:#14352E;background:#fff;
+  -webkit-print-color-adjust:exact;print-color-adjust:exact}
+
+/* ── página A4 ── */
+@page{size:A4 portrait;margin:12mm 14mm 14mm 14mm}
+.page{width:100%;max-width:182mm;margin:0 auto;padding:0}
+
+/* ── cabeçalho ── */
+.hdr{background:linear-gradient(135deg,#12604A,#1F7A5C);color:#fff;
+  padding:11px 14px 10px;margin-bottom:0;page-break-inside:avoid}
+.hdr-top{display:flex;align-items:center;gap:6px;margin-bottom:5px}
+.hdr-brand{font-size:7.5pt;letter-spacing:.16em;text-transform:uppercase;opacity:.8;font-weight:700}
+.hdr h1{font-size:13pt;font-weight:800;letter-spacing:-.01em;margin-bottom:3px}
+.hdr-meta{font-size:8pt;opacity:.75;line-height:1.55}
+.hdr-disc{margin-top:6px;padding-top:5px;border-top:1px solid rgba(255,255,255,.2);
+  font-size:7pt;opacity:.55;line-height:1.4}
+
+/* ── seções ── */
+.sec{margin-top:10px;page-break-inside:avoid}
+.sh{font-size:7pt;letter-spacing:.14em;text-transform:uppercase;font-weight:800;
+  color:#1F7A5C;background:#D6E8DE;padding:3px 8px;border-left:2.5px solid #1F7A5C;margin-bottom:6px}
+
+/* ── KV grid ── */
+.kv{display:grid;grid-template-columns:1fr 1fr}
+.kc{padding:5px 8px;border-bottom:1px solid #EEF1EC}
+.kc:nth-child(odd){border-right:1px solid #EEF1EC}
+.kl{font-size:6.5pt;color:#8AA097;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
+.kv2{font-size:9.5pt;font-weight:800}
+
+/* ── cards de peso ── */
+.p3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:6px}
+.pc{border:1px solid #D6E8DE;border-radius:5px;padding:7px 5px;text-align:center;background:#F8FAF7}
+.pc.var{border-color:#1F7A5C;background:#D6E8DE}
+.pc.vup{border-color:#D99A2B;background:#F6E8CB}
+.pb{font-size:12pt;font-weight:800;margin-bottom:1px}
+.pl{font-size:6.5pt;color:#8AA097}
+
+/* ── barra proteína ── */
+.barw{background:#E7ECE4;border-radius:999px;height:7px;overflow:hidden;margin:4px 0}
+.barf{height:100%;background:#1F7A5C;border-radius:999px}
+
+/* ── sintomas ── */
+.srow{display:flex;justify-content:space-between;padding:3px 8px;border-bottom:1px solid #EEF1EC;font-size:8.5pt}
+.srow:last-child{border-bottom:none}
+.sn{font-weight:800;color:#BE6B60}
+
+/* ── timeline ── */
+.tl{position:relative;padding-left:14px}
+.tl:before{content:"";position:absolute;left:3px;top:2px;bottom:2px;width:1.5px;background:#D6E8DE}
+.te{position:relative;padding:0 0 7px;page-break-inside:avoid}
+.te:before{content:"";position:absolute;left:-12px;top:3px;width:7px;height:7px;
+  border-radius:50%;background:#1F7A5C;border:1.5px solid #fff;box-shadow:0 0 0 1.5px #1F7A5C}
+.td{font-size:7pt;font-weight:800;color:#1F7A5C}
+.tt{font-size:8pt;color:#14352E;margin-top:1px}
+
+/* ── resumo ── */
+.res{background:#D6E8DE;border-left:2.5px solid #1F7A5C;padding:8px 10px;margin-top:10px;page-break-inside:avoid}
+.res-t{font-size:6.5pt;letter-spacing:.13em;text-transform:uppercase;font-weight:800;color:#1F7A5C;margin-bottom:4px}
+.res p{font-size:8pt;line-height:1.6}
+
+/* ── tabela bio ── */
+table{width:100%;border-collapse:collapse}
+th{font-size:7pt;color:#8AA097;font-weight:700;text-align:center;padding:2px 5px}
+th:first-child{text-align:left}
+td{font-size:8.5pt;padding:3px 5px;border-bottom:1px solid #EEF1EC}
+td:not(:first-child){text-align:center}
+
+/* ── footer ── */
+.ftr{margin-top:12px;padding-top:7px;border-top:1px solid #EEF1EC;
+  text-align:center;font-size:6.5pt;color:#8AA097}
+
+/* ── nota pequena ── */
+.nota{font-size:7pt;color:#8AA097;margin-bottom:5px;padding:0 8px}
+
+/* ── botões (só tela, some na impressão) ── */
+.fab{position:fixed;bottom:18px;right:18px;display:flex;gap:8px;z-index:99}
+.fab button{padding:11px 18px;border-radius:12px;border:none;font-family:Arial;
+  font-size:11pt;font-weight:800;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.2)}
+.fp{background:#1F7A5C;color:#fff}
+.fc{background:#fff;color:#14352E;border:1px solid #D6E8DE}
+
+/* ── print: esconde botões, remove sombras ── */
+@media print{
+  .fab{display:none!important}
+  body{background:#fff}
+  .sec{page-break-inside:avoid}
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- CABEÇALHO -->
+<div class="hdr">
+  <div class="hdr-top">
+    <svg width="16" height="16" viewBox="0 0 40 40" fill="none">
+      <circle cx="20" cy="20" r="18" stroke="rgba(255,255,255,.6)" stroke-width="2.2"/>
+      <path d="M20 6L24 20L20 34L16 20Z" fill="rgba(255,255,255,.9)"/>
+      <circle cx="20" cy="20" r="3" fill="rgba(255,255,255,.4)"/>
+    </svg>
+    <span class="hdr-brand">Compasso · NutriEase</span>
+  </div>
+  <h1>Relatório de Evolução</h1>
+  <div class="hdr-meta">
+    <b>${esc(p.nome)}</b> &nbsp;·&nbsp; ${fmtBRy(ini)} a ${fmtBRy(fim)} &nbsp;·&nbsp; ${daysBetween(ini,fim)+1} dias &nbsp;·&nbsp; Emitido em ${fmtBRy(todayISO())}
+  </div>
+  <div class="hdr-disc">Este relatório é informativo e não substitui a avaliação do seu médico ou nutricionista. O Compasso é um diário pessoal de acompanhamento.</div>
+</div>
+
+<!-- MEDICAÇÃO -->
+<div class="sec">
+  <div class="sh">Medicação</div>
+  <div class="kv">
+    <div class="kc"><div class="kl">Medicamento</div><div class="kv2">${esc(p.medicamento)}</div></div>
+    <div class="kc"><div class="kl">Dose atual</div><div class="kv2">${esc(p.doseAtual)} ${esc(p.unidade)}</div></div>
+    <div class="kc"><div class="kl">Frequência</div><div class="kv2">1× por semana</div></div>
+    <div class="kc"><div class="kl">Aplicações no período</div><div class="kv2">${d.apps.length}</div></div>
+    <div class="kc"><div class="kl">Última aplicação</div><div class="kv2">${d.lastAppObj?fmtBRy(d.lastAppObj.date):'—'}</div></div>
+    <div class="kc"><div class="kl">Próxima aplicação</div><div class="kv2">${na.days===0?'Hoje':WD[p.diaAplicacao]+', '+fmtBRy(na.date)}</div></div>
+  </div>
+</div>
+
+<!-- PESO -->
+<div class="sec">
+  <div class="sh">Evolução do peso</div>
+  <div class="p3">
+    <div class="pc"><div class="pb">${nf(d.pesoIniPeriod)} <span style="font-size:7.5pt;font-weight:400">kg</span></div><div class="pl">Início do período</div></div>
+    <div class="pc var ${d.varPeso>0?'vup':''}"><div class="pb" style="color:${d.varPeso<=0?'#1F7A5C':'#D99A2B'}">${d.varPeso<=0?'−':'+'}${nf(Math.abs(d.varPeso))} <span style="font-size:7.5pt">kg</span></div><div class="pl">Variação</div></div>
+    <div class="pc"><div class="pb">${nf(d.pesoFimPeriod)} <span style="font-size:7.5pt;font-weight:400">kg</span></div><div class="pl">Peso atual</div></div>
+  </div>
+  <div class="kv">
+    <div class="kc"><div class="kl">Peso inicial do tratamento</div><div class="kv2">${nf(p.pesoInicial)} kg</div></div>
+    <div class="kc"><div class="kl">Peso meta</div><div class="kv2">${nf(p.pesoMeta)} kg</div></div>
+    <div class="kc"><div class="kl">Total perdido no tratamento</div><div class="kv2" style="color:#1F7A5C">−${nf(lost())} kg (${nf(lostPct())}%)</div></div>
+    <div class="kc"><div class="kl">Falta para a meta</div><div class="kv2">${falta>0?nf(falta)+' kg':'✓ Meta atingida'}</div></div>
+  </div>
+  ${d.w.length>=2?sparkSVG(d.w):''}
+</div>
+
+<!-- HIDRATAÇÃO -->
+${d.diasTotal>0?`<div class="sec">
+  <div class="sh">Hidratação</div>
+  <div class="kv">
+    <div class="kc"><div class="kl">Meta diária</div><div class="kv2">${nf(p.metaAgua)} L</div></div>
+    <div class="kc"><div class="kl">Média diária registrada</div><div class="kv2">${nf(d.mediaAgua)} L</div></div>
+    <div class="kc"><div class="kl">Dias com meta atingida</div><div class="kv2">${d.metaAguaAtingida} de ${d.diasTotal}</div></div>
+    <div class="kc"><div class="kl">Dias registrados</div><div class="kv2">${d.diasTotal}</div></div>
+  </div>
+</div>`:''}
+
+<!-- PROTEÍNA -->
+${d.mediaProt>0?`<div class="sec">
+  <div class="sh">Meta Proteica</div>
+  <div class="kv">
+    <div class="kc"><div class="kl">Meta diária</div><div class="kv2">${p.metaProteina} g</div></div>
+    <div class="kc"><div class="kl">Média diária consumida</div><div class="kv2">${d.mediaProt} g</div></div>
+  </div>
+  <div style="padding:4px 8px 2px">
+    <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+      <span style="font-size:7pt;color:#8AA097">Adesão média</span>
+      <span style="font-weight:800;color:#1F7A5C;font-size:7.5pt">${adesaoProt}%</span>
+    </div>
+    <div class="barw"><div class="barf" style="width:${Math.min(100,adesaoProt)}%"></div></div>
+  </div>
+</div>`:''}
+
+<!-- CHECK-IN -->
+${diasHumor.length>0?`<div class="sec">
+  <div class="sh">Check-in</div>
+  <div class="kv">
+    ${d.mediaHumor>0?`<div class="kc"><div class="kl">Humor médio</div><div class="kv2">${H[Math.round(d.mediaHumor)]||'—'}</div></div>`:''}
+    ${d.apetiteDom?`<div class="kc"><div class="kl">Apetite predominante</div><div class="kv2">${d.apetiteDom}</div></div>`:''}
+  </div>
+</div>`:''}
+
+<!-- SINTOMAS -->
+<div class="sec">
+  <div class="sh">Sintomas</div>
+  ${comSint.length===0
+    ?'<p class="nota" style="padding:4px 8px">Nenhum sintoma registrado no período.</p>'
+    :comSint.map(s=>`<div class="srow"><span>${s}</span><span class="sn">${d.contSint[s]} dia(s)</span></div>`).join('')}
+</div>
+
+<!-- BIOIMPEDÂNCIA -->
+${bioSec()}
+
+<!-- LINHA DO TEMPO -->
+${tl.length?`<div class="sec">
+  <div class="sh">Linha do tempo</div>
+  <div class="tl">${tl.slice(0,25).map(e=>`
+    <div class="te"><div class="td">${fmtBRy(e.date)}</div><div class="tt">${e.txt}</div></div>`).join('')}
+  </div>
+</div>`:''}
+
+<!-- RESUMO -->
+<div class="res">
+  <div class="res-t">Resumo automático</div>
+  <p>${gerarResumo(d,ini,fim)}</p>
+</div>
+
+<!-- FOOTER -->
+<div class="ftr">Compasso · companheiro de tratamento GLP-1 · NutriEase · Relatório gerado em ${fmtBRy(todayISO())}</div>
+
+</div><!-- /page -->
+
+<!-- BOTÕES FLUTUANTES (somem na impressão) -->
+<div class="fab">
+  <button class="fc" onclick="window.close()">✕ Fechar</button>
+  <button class="fp" onclick="window.print()">⬇ Imprimir / Salvar PDF</button>
+</div>
+</body>
+</html>`;
+}
+
+function mostrarPreview(html,ini,fim){
+  const w=window.open('','_blank');
+  if(!w){toast('Abra o app fora do Claude.ai para usar esta função');return;}
+  w.document.write(html);
+  w.document.close();
+}
+
+function gerarRelatorio(){
+  const{ini,fim}=periodoRange();
+  if(ini>fim){toast('A data inicial deve ser anterior à final');return;}
+  toast('Gerando relatório…');
+  setTimeout(()=>{
+    try{
+      const d=coletaDados(ini,fim);
+      mostrarPreview(buildPDF(d,ini,fim),ini,fim);
+    }catch(e){
+      console.error(e);
+      toast('Erro ao gerar. Abra o app no navegador para usar esta função.');
+    }
+  },80);
+}
+
+/* ---------- boot ---------- */
+render();
