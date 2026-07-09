@@ -1268,25 +1268,34 @@ function coletaDados(ini,fim){
 
 /* -------- resumo automático -------- */
 function gerarResumo(d,ini,fim){
-  const dias=daysBetween(ini,fim)+1;
-  const partes=[];
-  if(d.varPeso<0) partes.push(`houve uma redução de ${nf(Math.abs(d.varPeso))} kg no peso durante o período`);
-  else if(d.varPeso===0) partes.push('o peso se manteve estável no período');
-  else partes.push(`o peso variou +${nf(d.varPeso)} kg no período`);
-  if(d.mediaAgua>=S.profile.metaAgua*0.85) partes.push('a hidratação foi satisfatória');
-  else if(d.mediaAgua>0) partes.push('a hidratação ficou abaixo da meta diária');
-  if(d.adesaoProt>=90) partes.push('a meta proteica foi bem atendida');
-  else if(d.adesaoProt>=70) partes.push('a ingestão proteica ficou próxima da meta');
-  else if(d.adesaoProt>0) partes.push('a ingestão proteica esteve abaixo da meta');
+  const frases=[];
+
+  // peso
+  if(d.varPeso<0) frases.push(`No período avaliado (${fmtBRy(ini)} a ${fmtBRy(fim)}), o peso apresentou redução de ${nf(Math.abs(d.varPeso))} kg.`);
+  else if(d.varPeso===0) frases.push(`No período avaliado (${fmtBRy(ini)} a ${fmtBRy(fim)}), o peso manteve-se estável.`);
+  else frases.push(`No período avaliado (${fmtBRy(ini)} a ${fmtBRy(fim)}), houve variação de +${nf(d.varPeso)} kg no peso.`);
+
+  // hidratação + proteína
+  const hidTxt=d.mediaAgua>=S.profile.metaAgua*0.85?'manteve-se em nível satisfatório'
+    :d.mediaAgua>0?'ficou abaixo da meta diária estabelecida':null;
+  const protTxt=d.adesaoProt>=90?'a meta proteica foi bem atendida'
+    :d.adesaoProt>=70?'a ingestão proteica ficou próxima da meta'
+    :d.adesaoProt>0?'a ingestão proteica esteve abaixo da meta'
+    :null;
+  if(hidTxt&&protTxt) frases.push(`A hidratação ${hidTxt}, e ${protTxt}.`);
+  else if(hidTxt) frases.push(`A hidratação ${hidTxt}.`);
+  else if(protTxt) frases.push(`Quanto à alimentação, ${protTxt}.`);
+
+  // sintomas + aplicações
   const nSint=Object.values(d.contSint).reduce((s,v)=>s+v,0);
-  if(nSint===0) partes.push('nenhum sintoma foi registrado');
-  else if(nSint<=3) partes.push('os sintomas registrados foram leves e ocasionais');
-  else partes.push('foram registrados alguns sintomas ao longo do período');
-  if(d.apps.length>0) partes.push(`foram realizadas ${d.apps.length} aplicação(ões) de ${esc(S.profile.medicamento)}`);
-  let txt=`Durante o período analisado (${fmtBRy(ini)} a ${fmtBRy(fim)}), `;
-  txt+=partes.join(', ')+'. ';
-  txt+='Este relatório foi gerado automaticamente a partir dos registros do paciente e não substitui a avaliação do médico ou nutricionista responsável.';
-  return txt;
+  const sintTxt=nSint===0?'Não foram registrados sintomas relevantes no período'
+    :nSint<=3?'Os sintomas registrados foram leves e ocasionais'
+    :'Foram registrados sintomas com certa frequência ao longo do período';
+  const appTxt=d.apps.length>0?`, com ${d.apps.length} aplicação(ões) de ${esc(S.profile.medicamento)} realizada(s) no intervalo`:'';
+  frases.push(`${sintTxt}${appTxt}.`);
+
+  frases.push('Este relatório foi gerado automaticamente a partir dos registros do paciente e não substitui a avaliação do médico ou nutricionista responsável.');
+  return frases.join(' ');
 }
 
 /* -------- linha do tempo de eventos -------- */
@@ -1447,7 +1456,7 @@ function buildPDF(d,ini,fim){
       return `<text x="${pl-4}" y="${cy+4}" text-anchor="end" font-size="8" fill="#8AA097" font-family="Arial">${nf(v)}</text>
 <line x1="${pl}" y1="${cy}" x2="${W-pr}" y2="${cy}" stroke="#E4E9E0" stroke-width="0.8"/>`;
     }).join('');
-    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block;margin:8px 0">
+    return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;display:block;margin:10px 0">
       <defs><linearGradient id="rg" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0" stop-color="#1F7A5C" stop-opacity=".15"/>
         <stop offset="1" stop-color="#1F7A5C" stop-opacity="0"/></linearGradient></defs>
@@ -1455,34 +1464,81 @@ function buildPDF(d,ini,fim){
       ${goal>mn&&goal<mx?`<line x1="${pl}" y1="${gy.toFixed(1)}" x2="${W-pr}" y2="${gy.toFixed(1)}" stroke="#D99A2B" stroke-width="1.2" stroke-dasharray="5,3"/>
         <text x="${W-pr}" y="${(gy-3).toFixed(1)}" text-anchor="end" font-size="8" fill="#D99A2B" font-family="Arial">meta ${nf(goal)}</text>`:''}
       <path d="${area}" fill="url(#rg)"/>
-      <polyline points="${weighings.map((w,i)=>X(i).toFixed(1)+','+Y(w.peso).toFixed(1)).join(' ')}" fill="none" stroke="#1F7A5C" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-      ${weighings.map((w,i)=>`<circle cx="${X(i).toFixed(1)}" cy="${Y(w.peso).toFixed(1)}" r="${i===weighings.length-1?3.5:2}" fill="${i===weighings.length-1?'#12604A':'#1F7A5C'}" stroke="#fff" stroke-width="1.2"/>`).join('')}
+      <polyline points="${weighings.map((w,i)=>X(i).toFixed(1)+','+Y(w.peso).toFixed(1)).join(' ')}" fill="none" stroke="#1F7A5C" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+      ${weighings.map((w,i)=>`<circle cx="${X(i).toFixed(1)}" cy="${Y(w.peso).toFixed(1)}" r="${i===weighings.length-1?3:1.8}" fill="${i===weighings.length-1?'#12604A':'#1F7A5C'}" stroke="#fff" stroke-width="1.2"/>`).join('')}
       <text x="${X(0).toFixed(1)}" y="${H-4}" font-size="8" fill="#8AA097" font-family="Arial">${fmtBR(weighings[0].date)}</text>
       <text x="${X(weighings.length-1).toFixed(1)}" y="${H-4}" text-anchor="end" font-size="8" fill="#8AA097" font-family="Arial">${fmtBR(weighings[weighings.length-1].date)}</text>
     </svg>`;
   }
 
-  /* bioimpedância */
-  function bioSec(){
-    if(!d.bio||!d.bio.length) return '';
-    const bf=d.bio[0], bl=d.bio[d.bio.length-1];
-    const fields=[['gordura','Gordura corporal','%'],['massaMagra','Massa magra','kg'],
-      ['musculo','Massa muscular','kg'],['agua','Água corporal','%'],
-      ['visceral','Gordura visceral',''],['tmb','Metabolismo basal','kcal']];
-    const rows=fields.filter(([k])=>bf[k]!=null||bl[k]!=null).map(([k,lbl,u])=>`
-      <tr>
+  /* evolução das medidas corporais (desde o início do tratamento) */
+  function medidasSec(){
+    const measures=[['cintura','Cintura'],['abdomen','Abdômen'],['quadril','Quadril'],['braco','Braço'],['coxa','Coxa']];
+    const wAll=sortedWeigh();
+    const rows=measures.map(([k,lbl])=>{
+      const withM=wAll.filter(x=>x[k]!=null);
+      if(!withM.length) return '';
+      const f=withM[0][k], l=withM[withM.length-1][k];
+      const single=withM.length<2;
+      const diff=single?null:+(l-f).toFixed(1);
+      const good=diff!=null&&diff<=0;
+      return `<tr>
         <td>${lbl}</td>
-        <td style="text-align:center">${bf[k]!=null?nf(bf[k])+' '+u:'—'}</td>
-        <td style="text-align:center;font-weight:700;color:${bl[k]!=null&&bf[k]!=null&&bl[k]<bf[k]?'#1F7A5C':'#14352E'}">${bl[k]!=null?nf(bl[k])+' '+u:'—'}</td>
-      </tr>`).join('');
+        <td style="text-align:center">${single?'—':nf(f)+' cm'}</td>
+        <td style="text-align:center;font-weight:600">${nf(l)} cm</td>
+        <td style="text-align:center;font-weight:600;color:${diff==null?'#8AA097':(good?'#1F7A5C':'#14352E')}">${diff==null?'—':(diff<=0?'−':'+')+nf(Math.abs(diff))+' cm'}</td>
+      </tr>`;
+    }).join('');
     if(!rows) return '';
-    const nota=d.bio.length>=2?`${fmtBRy(bf.date)} → ${fmtBRy(bl.date)}`:`1 registro em ${fmtBRy(bf.date)}`;
     return `<div class="sec">
-      <div class="sh">Bioimpedância</div>
-      <p class="nota">${nota}</p>
-      <table><thead><tr><th style="text-align:left">Indicador</th><th>Inicial</th><th>Atual</th></tr></thead>
+      <div class="sh">Evolução das medidas corporais</div>
+      <p class="nota">Comparativo desde o início do tratamento (${fmtBRy(p.dataInicio)})</p>
+      <table><thead><tr><th style="text-align:left">Medida</th><th>Inicial</th><th>Atual</th><th>Diferença</th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
   }
+
+  /* evolução da bioimpedância */
+  function bioSec(){
+    if(!d.bio||!d.bio.length) return '';
+    const BIOM=[['gordura','Gordura corporal','%','down'],['massaMagra','Massa magra','kg','up'],
+      ['musculo','Massa muscular','kg','up'],['agua','Água corporal','%','up'],
+      ['visceral','Gordura visceral','','down'],['tmb','Metabolismo basal','kcal','up']];
+    const bf=d.bio[0], bl=d.bio[d.bio.length-1];
+    const single=d.bio.length<2;
+    const rows=BIOM.filter(([k])=>bf[k]!=null||bl[k]!=null).map(([k,lbl,u,better])=>{
+      const dec=u==='kcal'?0:1;
+      const vi=bf[k], va=bl[k];
+      const diff=(!single&&vi!=null&&va!=null)?+(va-vi).toFixed(2):null;
+      const good=diff!=null&&(better==='down'?diff<0:diff>0);
+      return `<tr>
+        <td>${lbl}</td>
+        <td style="text-align:center">${single?'—':(vi!=null?nf(vi,dec)+' '+u:'—')}</td>
+        <td style="text-align:center;font-weight:600">${va!=null?nf(va,dec)+' '+u:'—'}</td>
+        <td style="text-align:center;font-weight:600;color:${diff==null?'#8AA097':(good?'#1F7A5C':'#14352E')}">${diff==null?'—':(diff<=0?'−':'+')+nf(Math.abs(diff),dec)+' '+u}</td>
+      </tr>`;
+    }).join('');
+    if(!rows) return '';
+    const nota=single?`1 registro no período, em ${fmtBRy(bf.date)} — comparativo indisponível.`:`Comparativo entre ${fmtBRy(bf.date)} e ${fmtBRy(bl.date)}`;
+    return `<div class="sec">
+      <div class="sh">Evolução da bioimpedância</div>
+      <p class="nota">${nota}</p>
+      <table><thead><tr><th style="text-align:left">Indicador</th><th>Inicial</th><th>Atual</th><th>Diferença</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  }
+
+  /* resumo executivo */
+  const topSint=Object.entries(d.contSint).sort((a,b)=>b[1]-a[1])[0];
+  const rx=[
+    ['Peso inicial do período',nf(d.pesoIniPeriod)+' kg',null],
+    ['Peso atual',nf(d.pesoFimPeriod)+' kg',null],
+    ['Variação no período',(d.varPeso<=0?'−':'+')+nf(Math.abs(d.varPeso))+' kg',d.varPeso<=0?'#1F7A5C':'#D99A2B'],
+    ['Perdido desde o início',`−${nf(lost())} kg (${nf(lostPct())}%)`,'#1F7A5C'],
+    ['Aplicações no período',String(d.apps.length),null],
+    ['Dose atual',esc(p.doseAtual)+' '+esc(p.unidade),null],
+    ['Adesão à meta proteica',d.mediaProt>0?adesaoProt+'%':'—',null],
+    ['Média de hidratação',(d.diasTotal>0&&d.mediaAgua>0)?nf(d.mediaAgua)+' L':'—',null],
+    ['Principal sintoma',topSint?`${topSint[0]} (${topSint[1]}d)`:'Nenhum registrado',null],
+  ];
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -1493,7 +1549,7 @@ function buildPDF(d,ini,fim){
 <style>
 /* ── reset ── */
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{font-family:Arial,Helvetica,sans-serif;font-size:9.5pt;color:#14352E;background:#fff;
+html,body{font-family:Arial,Helvetica,sans-serif;font-size:9pt;font-weight:400;color:#14352E;background:#fff;
   -webkit-print-color-adjust:exact;print-color-adjust:exact}
 
 /* ── página A4 ── */
@@ -1502,70 +1558,74 @@ html,body{font-family:Arial,Helvetica,sans-serif;font-size:9.5pt;color:#14352E;b
 
 /* ── cabeçalho ── */
 .hdr{background:linear-gradient(135deg,#12604A,#1F7A5C);color:#fff;
-  padding:11px 14px 10px;margin-bottom:0;page-break-inside:avoid}
-.hdr-top{display:flex;align-items:center;gap:6px;margin-bottom:5px}
-.hdr-brand{font-size:7.5pt;letter-spacing:.16em;text-transform:uppercase;opacity:.8;font-weight:700}
-.hdr h1{font-size:13pt;font-weight:800;letter-spacing:-.01em;margin-bottom:3px}
-.hdr-meta{font-size:8pt;opacity:.75;line-height:1.55}
-.hdr-disc{margin-top:6px;padding-top:5px;border-top:1px solid rgba(255,255,255,.2);
-  font-size:7pt;opacity:.55;line-height:1.4}
+  padding:16px 18px 14px;margin-bottom:0;page-break-inside:avoid}
+.hdr-top{display:flex;align-items:center;gap:7px;margin-bottom:9px}
+.hdr-top h1{font-size:13.5pt;font-weight:700;letter-spacing:-.005em}
+.hdr-pac{font-size:11pt;font-weight:700;margin-bottom:7px}
+.hdr-meta{font-size:8pt;font-weight:400;opacity:.82;line-height:1.9}
+.hdr-disc{margin-top:9px;padding-top:8px;border-top:1px solid rgba(255,255,255,.22);
+  font-size:7pt;font-weight:400;opacity:.6;line-height:1.5}
 
 /* ── seções ── */
-.sec{margin-top:10px;page-break-inside:avoid}
-.sh{font-size:7pt;letter-spacing:.14em;text-transform:uppercase;font-weight:800;
-  color:#1F7A5C;background:#D6E8DE;padding:3px 8px;border-left:2.5px solid #1F7A5C;margin-bottom:6px}
+.sec{margin-top:22px;page-break-inside:avoid}
+.sh{font-size:7pt;letter-spacing:.12em;text-transform:uppercase;font-weight:700;
+  color:#1F7A5C;background:#D6E8DE;padding:4px 9px;border-left:2.5px solid #1F7A5C;margin-bottom:10px}
 
 /* ── KV grid ── */
 .kv{display:grid;grid-template-columns:1fr 1fr}
-.kc{padding:5px 8px;border-bottom:1px solid #EEF1EC}
+.kc{padding:9px 10px;border-bottom:1px solid #EEF1EC}
 .kc:nth-child(odd){border-right:1px solid #EEF1EC}
-.kl{font-size:6.5pt;color:#8AA097;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}
-.kv2{font-size:9.5pt;font-weight:800}
+.kl{font-size:7pt;color:#8AA097;font-weight:400;margin-bottom:3px}
+.kv2{font-size:9.5pt;font-weight:600}
+
+/* ── resumo executivo ── */
+.rx{display:grid;grid-template-columns:1fr 1fr 1fr}
+.rx .kc:not(:nth-child(3n)){border-right:1px solid #EEF1EC}
 
 /* ── cards de peso ── */
-.p3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;margin-bottom:6px}
-.pc{border:1px solid #D6E8DE;border-radius:5px;padding:7px 5px;text-align:center;background:#F8FAF7}
+.p3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px}
+.pc{border:1px solid #E4E9E0;border-radius:5px;padding:12px 6px;text-align:center;background:#FCFDFB}
 .pc.var{border-color:#1F7A5C;background:#D6E8DE}
 .pc.vup{border-color:#D99A2B;background:#F6E8CB}
-.pb{font-size:12pt;font-weight:800;margin-bottom:1px}
+.pb{font-size:13pt;font-weight:700;margin-bottom:3px}
 .pl{font-size:6.5pt;color:#8AA097}
 
 /* ── barra proteína ── */
-.barw{background:#E7ECE4;border-radius:999px;height:7px;overflow:hidden;margin:4px 0}
+.barw{background:#E7ECE4;border-radius:999px;height:6px;overflow:hidden;margin:6px 0}
 .barf{height:100%;background:#1F7A5C;border-radius:999px}
 
 /* ── sintomas ── */
-.srow{display:flex;justify-content:space-between;padding:3px 8px;border-bottom:1px solid #EEF1EC;font-size:8.5pt}
+.srow{display:flex;justify-content:space-between;padding:7px 9px;border-bottom:1px solid #EEF1EC;font-size:9pt}
 .srow:last-child{border-bottom:none}
-.sn{font-weight:800;color:#BE6B60}
+.sn{font-weight:700;color:#BE6B60}
 
 /* ── timeline ── */
-.tl{position:relative;padding-left:14px}
+.tl{position:relative;padding-left:15px}
 .tl:before{content:"";position:absolute;left:3px;top:2px;bottom:2px;width:1.5px;background:#D6E8DE}
-.te{position:relative;padding:0 0 7px;page-break-inside:avoid}
-.te:before{content:"";position:absolute;left:-12px;top:3px;width:7px;height:7px;
+.te{position:relative;padding:0 0 11px;page-break-inside:avoid}
+.te:before{content:"";position:absolute;left:-13px;top:3px;width:6px;height:6px;
   border-radius:50%;background:#1F7A5C;border:1.5px solid #fff;box-shadow:0 0 0 1.5px #1F7A5C}
-.td{font-size:7pt;font-weight:800;color:#1F7A5C}
-.tt{font-size:8pt;color:#14352E;margin-top:1px}
+.td{font-size:7pt;font-weight:700;color:#1F7A5C}
+.tt{font-size:8.5pt;font-weight:400;color:#14352E;margin-top:2px}
 
-/* ── resumo ── */
-.res{background:#D6E8DE;border-left:2.5px solid #1F7A5C;padding:8px 10px;margin-top:10px;page-break-inside:avoid}
-.res-t{font-size:6.5pt;letter-spacing:.13em;text-transform:uppercase;font-weight:800;color:#1F7A5C;margin-bottom:4px}
-.res p{font-size:8pt;line-height:1.6}
+/* ── resumo automático ── */
+.res{background:#F8FAF7;border:1px solid #D6E8DE;border-left:2.5px solid #1F7A5C;padding:14px 16px;margin-top:22px;page-break-inside:avoid}
+.res-t{font-size:6.5pt;letter-spacing:.12em;text-transform:uppercase;font-weight:700;color:#1F7A5C;margin-bottom:6px}
+.res p{font-size:8.5pt;font-weight:400;line-height:1.75}
 
-/* ── tabela bio ── */
+/* ── tabelas ── */
 table{width:100%;border-collapse:collapse}
-th{font-size:7pt;color:#8AA097;font-weight:700;text-align:center;padding:2px 5px}
+th{font-size:6.5pt;color:#8AA097;font-weight:600;text-transform:uppercase;letter-spacing:.03em;text-align:center;padding:4px 6px}
 th:first-child{text-align:left}
-td{font-size:8.5pt;padding:3px 5px;border-bottom:1px solid #EEF1EC}
+td{font-size:9pt;font-weight:400;padding:8px 6px;border-bottom:1px solid #EEF1EC}
 td:not(:first-child){text-align:center}
 
 /* ── footer ── */
-.ftr{margin-top:12px;padding-top:7px;border-top:1px solid #EEF1EC;
-  text-align:center;font-size:6.5pt;color:#8AA097}
+.ftr{margin-top:26px;padding-top:10px;border-top:1px solid #EEF1EC;
+  text-align:center;font-size:7pt;font-weight:400;color:#8AA097;line-height:1.7}
 
 /* ── nota pequena ── */
-.nota{font-size:7pt;color:#8AA097;margin-bottom:5px;padding:0 8px}
+.nota{font-size:7pt;color:#8AA097;margin-bottom:8px}
 
 /* ── botões (só tela, some na impressão) ── */
 .fab{position:fixed;bottom:18px;right:18px;display:flex;gap:8px;z-index:99}
@@ -1588,18 +1648,27 @@ td:not(:first-child){text-align:center}
 <!-- CABEÇALHO -->
 <div class="hdr">
   <div class="hdr-top">
-    <svg width="16" height="16" viewBox="0 0 40 40" fill="none">
+    <svg width="17" height="17" viewBox="0 0 40 40" fill="none">
       <circle cx="20" cy="20" r="18" stroke="rgba(255,255,255,.6)" stroke-width="2.2"/>
       <path d="M20 6L24 20L20 34L16 20Z" fill="rgba(255,255,255,.9)"/>
       <circle cx="20" cy="20" r="3" fill="rgba(255,255,255,.4)"/>
     </svg>
-    <span class="hdr-brand">Compasso · NutriEase</span>
+    <h1>Compasso · Relatório de Evolução</h1>
   </div>
-  <h1>Relatório de Evolução</h1>
+  <div class="hdr-pac">${esc(p.nome)}</div>
   <div class="hdr-meta">
-    <b>${esc(p.nome)}</b> &nbsp;·&nbsp; ${fmtBRy(ini)} a ${fmtBRy(fim)} &nbsp;·&nbsp; ${daysBetween(ini,fim)+1} dias &nbsp;·&nbsp; Emitido em ${fmtBRy(todayISO())}
+    Período: ${fmtBRy(ini)} a ${fmtBRy(fim)} · ${daysBetween(ini,fim)+1} dias<br>
+    Emitido em: ${fmtBRy(todayISO())}
   </div>
   <div class="hdr-disc">Este relatório é informativo e não substitui a avaliação do seu médico ou nutricionista. O Compasso é um diário pessoal de acompanhamento.</div>
+</div>
+
+<!-- RESUMO EXECUTIVO -->
+<div class="sec">
+  <div class="sh">Resumo executivo</div>
+  <div class="kv rx">
+    ${rx.map(([lbl,val,color])=>`<div class="kc"><div class="kl">${lbl}</div><div class="kv2"${color?` style="color:${color}"`:''}>${val}</div></div>`).join('')}
+  </div>
 </div>
 
 <!-- MEDICAÇÃO -->
@@ -1625,12 +1694,15 @@ td:not(:first-child){text-align:center}
   </div>
   <div class="kv">
     <div class="kc"><div class="kl">Peso inicial do tratamento</div><div class="kv2">${nf(p.pesoInicial)} kg</div></div>
+    <div class="kc"><div class="kl">Peso atual</div><div class="kv2">${nf(d.pesoFimPeriod)} kg</div></div>
     <div class="kc"><div class="kl">Peso meta</div><div class="kv2">${nf(p.pesoMeta)} kg</div></div>
-    <div class="kc"><div class="kl">Total perdido no tratamento</div><div class="kv2" style="color:#1F7A5C">−${nf(lost())} kg (${nf(lostPct())}%)</div></div>
     <div class="kc"><div class="kl">Falta para a meta</div><div class="kv2">${falta>0?nf(falta)+' kg':'✓ Meta atingida'}</div></div>
   </div>
   ${d.w.length>=2?sparkSVG(d.w):''}
 </div>
+
+<!-- MEDIDAS CORPORAIS -->
+${medidasSec()}
 
 <!-- HIDRATAÇÃO -->
 ${d.diasTotal>0?`<div class="sec">
@@ -1645,18 +1717,13 @@ ${d.diasTotal>0?`<div class="sec">
 
 <!-- PROTEÍNA -->
 ${d.mediaProt>0?`<div class="sec">
-  <div class="sh">Meta Proteica</div>
-  <div class="kv">
-    <div class="kc"><div class="kl">Meta diária</div><div class="kv2">${p.metaProteina} g</div></div>
-    <div class="kc"><div class="kl">Média diária consumida</div><div class="kv2">${d.mediaProt} g</div></div>
+  <div class="sh">Meta proteica</div>
+  <div style="display:flex;justify-content:space-between;font-size:8.5pt;color:#4A6159;margin-bottom:6px">
+    <span>Meta: <b style="color:#14352E">${p.metaProteina} g</b></span>
+    <span>Média: <b style="color:#14352E">${d.mediaProt} g</b></span>
   </div>
-  <div style="padding:4px 8px 2px">
-    <div style="display:flex;justify-content:space-between;margin-bottom:3px">
-      <span style="font-size:7pt;color:#8AA097">Adesão média</span>
-      <span style="font-weight:800;color:#1F7A5C;font-size:7.5pt">${adesaoProt}%</span>
-    </div>
-    <div class="barw"><div class="barf" style="width:${Math.min(100,adesaoProt)}%"></div></div>
-  </div>
+  <div class="barw"><div class="barf" style="width:${Math.min(100,adesaoProt)}%"></div></div>
+  <div style="font-size:8.5pt;font-weight:700;color:#1F7A5C;margin-top:5px">${adesaoProt}% de adesão</div>
 </div>`:''}
 
 <!-- CHECK-IN -->
@@ -1672,7 +1739,7 @@ ${diasHumor.length>0?`<div class="sec">
 <div class="sec">
   <div class="sh">Sintomas</div>
   ${comSint.length===0
-    ?'<p class="nota" style="padding:4px 8px">Nenhum sintoma registrado no período.</p>'
+    ?'<p class="nota">Nenhum sintoma registrado no período.</p>'
     :comSint.map(s=>`<div class="srow"><span>${s}</span><span class="sn">${d.contSint[s]} dia(s)</span></div>`).join('')}
 </div>
 
@@ -1694,7 +1761,7 @@ ${tl.length?`<div class="sec">
 </div>
 
 <!-- FOOTER -->
-<div class="ftr">Compasso · companheiro de tratamento GLP-1 · NutriEase · Relatório gerado em ${fmtBRy(todayISO())}</div>
+<div class="ftr">Compasso · companheiro de tratamento GLP-1<br>Relatório gerado em ${fmtBRy(todayISO())} · Este documento não substitui a avaliação do seu médico ou nutricionista.</div>
 
 </div><!-- /page -->
 
