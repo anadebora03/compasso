@@ -143,7 +143,7 @@ function evSetTab(t){EV_TAB=t;render();}
 function render(){
   const app=document.getElementById('app');
   if(!S){ app.innerHTML=obView(); bindOb(); return; }
-  const premiumScreen=QP_TABS.includes(TAB)||(TAB==='mais'&&SUB==='relatorio');
+  const premiumScreen=QP_TABS.includes(TAB)||(TAB==='mais'&&(SUB===null||SUB==='relatorio'));
   app.innerHTML = topView() + `<div class="screen ${premiumScreen?'':'legacy'}" id="scr"></div>` + navView();
   const scr=document.getElementById('scr');
   let html='';
@@ -497,29 +497,46 @@ function diarioView(){
    TELA · MAIS (hub)
    ============================================================ */
 function maisView(){
-  const items=[
-    ['jornada','Minha jornada','Resumo automático da sua evolução','spark','amber'],
-    ['relatorio','Relatório de Evolução','Gere um PDF do seu progresso','doc','amber'],
-    ['insights','Insights','Padrões cruzados dos seus registros','chart',''],
-    ['conquistas','Conquistas','Marcos do tratamento','medal','amber'],
-    ['timeline','Linha do tempo','Todos os eventos em ordem','clock',''],
-    ['bio','Bioimpedância','Composição corporal ao longo do tempo','pulse',''],
-    ['stats','Estatísticas','Números do seu tratamento','grid',''],
-    ['calc','Calculadora','Quanto falta para cada meta','calc',''],
-    ['exames','Exames','Guarde e acompanhe resultados','flask',''],
-    ['agenda','Agenda','Consultas, exames e retornos','cal',''],
+  /* Mesmas 10 funcionalidades de sempre (mesmos ids/onclick de go('mais',id)),
+     agora só reorganizadas em grupos temáticos — nenhuma foi removida,
+     renomeada ou teve o destino alterado. */
+  const grupos=[
+    ['Minha jornada',[
+      {id:'jornada',t:'Minha jornada',s:'Resumo automático da sua evolução',ic:'spark',amber:true},
+      {id:'timeline',t:'Linha do tempo',s:'Todos os eventos em ordem',ic:'clock'},
+      {id:'conquistas',t:'Conquistas',s:'Marcos do tratamento',ic:'medal',amber:true},
+      {id:'insights',t:'Insights',s:'Padrões cruzados dos seus registros',ic:'chart'},
+    ]],
+    ['Saúde',[
+      {id:'bio',t:'Bioimpedância',s:'Composição corporal ao longo do tempo',ic:'pulse'},
+      {id:'exames',t:'Exames',s:'Guarde e acompanhe resultados',ic:'flask'},
+      {id:'stats',t:'Estatísticas',s:'Números do seu tratamento',ic:'grid'},
+      {id:'calc',t:'Calculadora',s:'Quanto falta para cada meta',ic:'calc'},
+    ]],
+    ['Relatórios',[
+      {id:'relatorio',t:'Relatório de Evolução',s:'Gere um PDF do seu progresso',ic:'doc',amber:true},
+    ]],
+    ['Agenda',[
+      {id:'agenda',t:'Agenda',s:'Consultas, exames e retornos',ic:'cal'},
+    ]],
   ];
+  const row=(ic,t,s,onclick,amber)=>`<button type="button" class="mais-item" onclick="${onclick}">
+    <span class="badge-glow${amber?' amber':''}">${icon(ic)}</span>
+    <span class="mais-item-text"><span class="mais-item-t">${t}</span><span class="mais-item-s">${s}</span></span>
+    <span class="mais-item-chevron">${icon('chevron')}</span>
+  </button>`;
   return `
   <div class="scr-title">Mais</div>
   <div class="scr-sub">Sua jornada em detalhe.</div>
-  <div class="card" style="padding:6px 18px">
-  <div class="list">
-    ${items.map(([id,t,s,ic,tone])=>`<div class="item" onclick="go('mais','${id}')" style="cursor:pointer">
-      <div class="badge-ico ${tone}">${icon(ic)}</div>
-      <div><div class="t">${t}</div><div class="s">${s}</div></div>
-      <div class="r faint">${icon('chevron')}</div></div>`).join('')}
-  </div></div>
-  <button class="btn btn-outline btn-block" onclick="openSheet('perfil')">${icon('gear',true)} Configurações e dados</button>`;
+  ${grupos.map(([label,items])=>`
+  <div class="gcard mais-group">
+    <div class="eyebrow2">${label}</div>
+    <div class="mais-list">${items.map(it=>row(it.ic,it.t,it.s,`go('mais','${it.id}')`,it.amber)).join('')}</div>
+  </div>`).join('')}
+  <div class="gcard mais-group">
+    <div class="eyebrow2">Conta</div>
+    <div class="mais-list">${row('gear','Configurações e dados','Perfil, metas e preferências do app',"openSheet('perfil')")}</div>
+  </div>`;
 }
 function maisSubView(sub){
   const back=`<button class="btn btn-outline btn-sm" onclick="go('mais')" style="margin-bottom:14px">${icon('chevron',false,true)} Voltar</button>`;
