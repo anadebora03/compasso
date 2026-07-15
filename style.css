@@ -406,6 +406,7 @@
     transition:border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out)}
   .glass-field .field-wrap:focus-within{border-color:var(--accent);background:var(--nv-glass-strong)}
   .glass-field .field-wrap.area{align-items:flex-start;padding:13px 16px}
+  .glass-field .field-wrap.static{cursor:default;opacity:.72}
   .glass-field .field-wrap svg{flex:0 0 auto;color:var(--tx-2);opacity:.85}
   .glass-field input,.glass-field select,.glass-field textarea{flex:1;width:100%;background:none;border:none;color:var(--tx-1);
     font-size:15.5px;font-family:inherit;letter-spacing:-.005em;outline:none;cursor:pointer}
@@ -478,6 +479,8 @@
     border:1px solid var(--nv-border);color:var(--accent-light)}
   .badge-glow.amber{color:#E8C078;background:linear-gradient(165deg,rgba(227,169,74,.12),rgba(227,169,74,.03));
     border-color:rgba(227,169,74,.18)}
+  .badge-glow.danger{color:var(--danger2);background:linear-gradient(165deg,var(--danger2-soft),rgba(224,134,119,.03));
+    border-color:rgba(224,134,119,.2)}
 
   /* Hub "Mais" — grupos de funcionalidades */
   .mais-group{margin-bottom:14px}
@@ -494,6 +497,7 @@
   .mais-item-text{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
   .mais-item-t{font-size:14.5px;font-weight:600;line-height:1.3;color:var(--tx-1);letter-spacing:-.005em}
   .mais-item-s{font-size:12.5px;font-weight:400;line-height:1.32;color:var(--tx-3)}
+  .mais-item.danger .mais-item-t{color:var(--danger2)}
   .mais-item-chevron{flex:0 0 auto;display:flex;color:var(--tx-3);opacity:.6}
   .mais-item-chevron svg{width:14px;height:14px;stroke-width:1.6}
 

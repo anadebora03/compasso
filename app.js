@@ -784,7 +784,7 @@ function closeSheet(){const b=document.getElementById('bd');if(b)b.remove();SHEE
 function renderSheet(){
   let old=document.getElementById('bd'); if(old)old.remove();
   if(!SHEET)return;
-  const premium=SHEET==='aplicar';
+  const premium=SHEET==='aplicar'||SHEET==='perfil';
   const bd=document.createElement('div');bd.className=premium?'backdrop-glass':'backdrop';bd.id='bd';
   bd.onclick=e=>{if(e.target===bd)closeSheet();};
   bd.innerHTML=premium?`<div class="sheet-glass">${sheetBody(SHEET)}</div>`:`<div class="sheet"><div class="grab"></div>${sheetBody(SHEET)}</div>`;
@@ -883,21 +883,76 @@ function sheetBody(id){
       <div class="field"><label>Metabolismo basal (kcal)</label><input id="bi-tmb" inputmode="numeric" placeholder="opcional"></div></div>
       <button class="btn btn-primary btn-block" onclick="saveBio()">Salvar bioimpedância</button>`;
   }
-  if(id==='perfil'){
-    const p=S.profile; const meds=['Ozempic','Wegovy','Mounjaro','Zepbound','Saxenda','Outro'];
-    return `<h2>Configurações</h2><p class="sub">Ajuste seus dados e metas.</p>
-      <div class="field"><label>Nome</label><input id="pf-nome" value="${esc(p.nome)}"></div>
-      <div class="field-2"><div class="field"><label>Medicamento</label><select id="pf-med">${meds.map(m=>`<option ${m===p.medicamento?'selected':''}>${m}</option>`).join('')}</select></div>
-      <div class="field"><label>Dose atual (${esc(p.unidade)})</label><input id="pf-dose" value="${esc(p.doseAtual)}"></div></div>
-      <div class="field"><label>Dia da aplicação</label><select id="pf-dia">${WD.map((d,i)=>`<option value="${i}" ${i===p.diaAplicacao?'selected':''}>${d}</option>`).join('')}</select></div>
-      <div class="field-2"><div class="field"><label>Altura (cm)</label><input id="pf-altura" inputmode="numeric" value="${p.altura}"></div>
-      <div class="field"><label>Peso meta (kg)</label><input id="pf-meta" inputmode="decimal" value="${p.pesoMeta}"></div></div>
-      <div class="field-2"><div class="field"><label>Meta de água (L)</label><input id="pf-agua" inputmode="decimal" value="${p.metaAgua}"></div>
-      <div class="field"><label>Meta proteína (g)</label><input id="pf-prot" inputmode="numeric" value="${p.metaProteina}"></div></div>
-      <button class="btn btn-primary btn-block" onclick="savePerfil()">Salvar alterações</button>
-      <button class="btn btn-outline btn-block mt8" onclick="resetAll()" style="color:var(--rose);border-color:var(--rose-soft)">Apagar todos os dados</button>`;
-  }
+  if(id==='perfil') return configuracoesView();
   return '';
+}
+
+/* ============================================================
+   CONFIGURAÇÕES — tela composta por seções independentes.
+   Cada seção é uma função isolada que devolve o conteúdo interno
+   de um cfgGroup(); para adicionar uma seção nova (ex.: Conta,
+   Privacidade, Integrações), crie uma função cfgXSecao() e inclua
+   uma linha cfgGroup('Rótulo', cfgXSecao(...)) em configuracoesView(),
+   sem tocar nas seções existentes.
+   ============================================================ */
+function cfgGroup(label,bodyHtml,extraStyle){
+  return `<div class="gcard tight"${extraStyle?` style="${extraStyle}"`:''}>
+    <div class="eyebrow2">${label}</div>
+    ${bodyHtml}
+  </div>`;
+}
+function cfgPerfilSecao(p,ic,meds,medIdx){
+  return `<div class="glass-field"><label for="pf-nome">Nome</label>
+      <label class="field-wrap" for="pf-nome">${ic('user')}<input id="pf-nome" value="${esc(p.nome)}"></label></div>
+    <div class="glass-field-2">
+      <div class="glass-field"><label>Medicamento</label>${comboField('pf-med','pill',meds.map(m=>({value:m,label:m})),medIdx)}</div>
+      <div class="glass-field"><label for="pf-dose">Dose atual</label>
+        <label class="field-wrap" for="pf-dose"><input id="pf-dose" value="${esc(p.doseAtual)}" inputmode="decimal"><span style="color:var(--tx-3);font-size:13px;white-space:nowrap">${esc(p.unidade)}</span></label></div>
+    </div>
+    <div class="glass-field"><label>Dia da aplicação</label>${comboField('pf-dia','cal',WD.map((d,i)=>({value:String(i),label:d})),p.diaAplicacao)}</div>
+    <div class="glass-field-2">
+      <div class="glass-field"><label>Início do tratamento</label>
+        <div class="field-wrap static">${ic('cal')}<span class="csel-value">${fmtBRy(p.dataInicio)}</span></div></div>
+      <div class="glass-field"><label>Peso inicial</label>
+        <div class="field-wrap static">${ic('scale')}<span class="csel-value">${nf(p.pesoInicial)} kg</span></div></div>
+    </div>`;
+}
+function cfgPreferenciasSecao(p,ic){
+  return `<div class="glass-field-2">
+      <div class="glass-field"><label for="pf-altura">Altura (cm)</label>
+        <label class="field-wrap" for="pf-altura">${ic('ruler')}<input id="pf-altura" inputmode="numeric" value="${p.altura}"></label></div>
+      <div class="glass-field"><label for="pf-meta">Peso meta (kg)</label>
+        <label class="field-wrap" for="pf-meta">${ic('target')}<input id="pf-meta" inputmode="decimal" value="${p.pesoMeta}"></label></div>
+    </div>
+    <div class="glass-field-2">
+      <div class="glass-field"><label for="pf-agua">Meta de água (L)</label>
+        <label class="field-wrap" for="pf-agua"><input id="pf-agua" inputmode="decimal" value="${p.metaAgua}"></label></div>
+      <div class="glass-field"><label for="pf-prot">Meta de proteína (g)</label>
+        <label class="field-wrap" for="pf-prot"><input id="pf-prot" inputmode="numeric" value="${p.metaProteina}"></label></div>
+    </div>`;
+}
+function cfgDadosSecao(){
+  return `<button type="button" class="mais-item danger" onclick="resetAll()">
+      <span class="badge-glow danger">${icon('alert')}</span>
+      <span class="mais-item-text"><span class="mais-item-t">Apagar todos os dados</span><span class="mais-item-s">Remove permanentemente tudo o que você registrou</span></span>
+    </button>`;
+}
+/* Seções futuras (Conta, Privacidade, Integrações) entram aqui como
+   cfgContaSecao(), cfgPrivacidadeSecao(), cfgIntegracoesSecao() —
+   sem lógica própria enquanto as funcionalidades não existirem. */
+function configuracoesView(){
+  const p=S.profile, ic=obIcon;
+  const meds=['Ozempic','Wegovy','Mounjaro','Zepbound','Saxenda','Outro'];
+  const medIdx=Math.max(0,meds.indexOf(p.medicamento));
+  return `<div class="grab"></div>
+    <h2>Configurações</h2><p class="sub">Seu perfil, preferências e dados em um só lugar.</p>
+
+    ${cfgGroup('Perfil',cfgPerfilSecao(p,ic,meds,medIdx))}
+    ${cfgGroup('Preferências',cfgPreferenciasSecao(p,ic))}
+
+    <button class="btn-pill block" onclick="savePerfil()">Salvar alterações</button>
+
+    ${cfgGroup('Dados',cfgDadosSecao(),'margin-top:14px;margin-bottom:2px')}`;
 }
 function lastAppNext(){ // sugere próximo local no rodízio
   const order=['Abdômen','Coxa direita','Coxa esquerda','Braço direito','Braço esquerdo'];
