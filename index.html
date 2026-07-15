@@ -19,11 +19,19 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Compasso">
 
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap">
+
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="app" id="app"></div>
 
+<script>
+  /* Ponte entre o módulo js/supabase.js (ESM) e o app.js (script clássico) */
+  window.__supabaseReady = new Promise((resolve) => { window.__resolveSupabaseReady = resolve; });
+</script>
 <script src="app.js"></script>
 <script type="module" src="js/supabase.js"></script>
 <script>

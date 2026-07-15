@@ -24,3 +24,7 @@ export function testarConexaoSupabase() {
 }
 
 testarConexaoSupabase();
+
+/* Libera o app.js (script clássico) para prosseguir, com o cliente pronto (ou null, se falhou). */
+if (window.__resolveSupabaseReady) window.__resolveSupabaseReady(supabase);
+else window.__supabaseReady = Promise.resolve(supabase);
