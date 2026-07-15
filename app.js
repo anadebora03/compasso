@@ -932,7 +932,11 @@ function cfgPreferenciasSecao(p,ic){
     </div>`;
 }
 function cfgDadosSecao(){
-  return `<button type="button" class="mais-item danger" onclick="resetAll()">
+  return `<button type="button" class="mais-item" onclick="doLogout()">
+      <span class="badge-glow">${icon('down')}</span>
+      <span class="mais-item-text"><span class="mais-item-t">Sair da conta</span><span class="mais-item-s">Encerra sua sessão neste dispositivo</span></span>
+    </button>
+    <button type="button" class="mais-item danger" onclick="resetAll()">
       <span class="badge-glow danger">${icon('alert')}</span>
       <span class="mais-item-text"><span class="mais-item-t">Apagar todos os dados</span><span class="mais-item-s">Remove permanentemente tudo o que você registrou</span></span>
     </button>`;
@@ -2408,17 +2412,185 @@ function welcomeView(){
     </div>
   </div>`;
 }
+/* ============================================================
+   AUTENTICAÇÃO — Login, Cadastro, Recuperar senha, Nova senha
+   Navegação isolada (AUTH_SCREEN), sem tocar em TAB/SUB/go().
+   Reaproveita integralmente os componentes do onboarding (.ob,
+   .glass-card, .glass-field, obIcon, .btn-pill) — nenhum
+   componente novo.
+   ============================================================ */
+let AUTH_SCREEN='welcome'; // 'welcome' | 'login' | 'cadastro' | 'recuperar' | 'nova-senha'
+let AUTH_MSG=null; // mensagem de sucesso exibida no lugar do formulário (ex.: "confira seu e-mail")
+
+function emailValido(e){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); }
+function goAuth(screen){ AUTH_MSG=null; AUTH_SCREEN=screen; renderWelcome(); }
+function authBackBtn(){
+  return `<div class="row" style="margin-bottom:14px"><button type="button" class="cal-nav" onclick="goAuth('welcome')">${CAL_CHEV_L}</button></div>`;
+}
+function authMsgPanel(titulo,texto,voltarLabel,voltarScreen){
+  return `<div class="ob">
+    <div class="glow-wrap ob-icon">${logoHeroSVG(56)}</div>
+    <h1>${titulo}</h1>
+    <p class="lead">${texto}</p>
+    <button type="button" class="btn-pill block" onclick="goAuth('${voltarScreen}')">${voltarLabel}</button>
+  </div>`;
+}
+const AUTH_ARROW='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
+
+function loginView(){
+  const ic=obIcon;
+  return `<div class="ob">
+    ${authBackBtn()}
+    <div class="glow-wrap ob-icon">${logoHeroSVG(56)}</div>
+    <h1>Entrar</h1>
+    <p class="lead">Acesse sua conta para continuar sua jornada.</p>
+    <div class="glass-card">
+      <div class="glass-field"><label for="li-email">E-mail</label>
+        <label class="field-wrap" for="li-email">${ic('user')}<input id="li-email" type="email" placeholder="seu@email.com" autocomplete="email"></label></div>
+      <div class="glass-field"><label for="li-senha">Senha</label>
+        <label class="field-wrap" for="li-senha"><input id="li-senha" type="password" placeholder="Sua senha" autocomplete="current-password"></label></div>
+      <button class="btn-pill block" id="li-btn" onclick="doLogin()">Entrar ${AUTH_ARROW}</button>
+    </div>
+    <button type="button" class="btn-pill block ghost neutral" onclick="goAuth('recuperar')">Esqueci minha senha</button>
+    <p class="center" style="font-size:12.5px;color:var(--tx-3);margin-top:18px">Não tem conta?
+      <button type="button" onclick="goAuth('cadastro')" style="color:var(--accent-light);font-weight:600;background:none;border:none;padding:0;font-size:inherit;cursor:pointer">Criar conta</button>
+    </p>
+  </div>`;
+}
+
+function cadastroView(){
+  if(AUTH_MSG) return authMsgPanel('Confira seu e-mail',AUTH_MSG,'Voltar para o login','login');
+  const ic=obIcon;
+  return `<div class="ob">
+    ${authBackBtn()}
+    <div class="glow-wrap ob-icon">${logoHeroSVG(56)}</div>
+    <h1>Criar conta</h1>
+    <p class="lead">Comece sua jornada com GLP-1 e acompanhe tudo em um só lugar.</p>
+    <div class="glass-card">
+      <div class="glass-field"><label for="cd-email">E-mail</label>
+        <label class="field-wrap" for="cd-email">${ic('user')}<input id="cd-email" type="email" placeholder="seu@email.com" autocomplete="email"></label></div>
+      <div class="glass-field"><label for="cd-senha">Senha</label>
+        <label class="field-wrap" for="cd-senha"><input id="cd-senha" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password"></label></div>
+      <div class="glass-field"><label for="cd-senha2">Confirmar senha</label>
+        <label class="field-wrap" for="cd-senha2"><input id="cd-senha2" type="password" placeholder="Repita a senha" autocomplete="new-password"></label></div>
+      <button class="btn-pill block" id="cd-btn" onclick="doSignUp()">Criar conta ${AUTH_ARROW}</button>
+    </div>
+    <p class="center" style="font-size:12.5px;color:var(--tx-3);margin-top:18px">Já tem conta?
+      <button type="button" onclick="goAuth('login')" style="color:var(--accent-light);font-weight:600;background:none;border:none;padding:0;font-size:inherit;cursor:pointer">Entrar</button>
+    </p>
+  </div>`;
+}
+
+function recuperarSenhaView(){
+  if(AUTH_MSG) return authMsgPanel('Verifique seu e-mail',AUTH_MSG,'Voltar para o login','login');
+  const ic=obIcon;
+  return `<div class="ob">
+    ${authBackBtn()}
+    <div class="glow-wrap ob-icon">${logoHeroSVG(56)}</div>
+    <h1>Recuperar senha</h1>
+    <p class="lead">Informe seu e-mail e enviaremos um link para redefinir sua senha.</p>
+    <div class="glass-card">
+      <div class="glass-field"><label for="rs-email">E-mail</label>
+        <label class="field-wrap" for="rs-email">${ic('user')}<input id="rs-email" type="email" placeholder="seu@email.com" autocomplete="email"></label></div>
+      <button class="btn-pill block" id="rs-btn" onclick="doResetPassword()">Enviar link ${AUTH_ARROW}</button>
+    </div>
+  </div>`;
+}
+
+function novaSenhaView(){
+  return `<div class="ob">
+    <div class="glow-wrap ob-icon">${logoHeroSVG(56)}</div>
+    <h1>Nova senha</h1>
+    <p class="lead">Defina uma nova senha para sua conta.</p>
+    <div class="glass-card">
+      <div class="glass-field"><label for="ns-senha">Nova senha</label>
+        <label class="field-wrap" for="ns-senha"><input id="ns-senha" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password"></label></div>
+      <div class="glass-field"><label for="ns-senha2">Confirmar nova senha</label>
+        <label class="field-wrap" for="ns-senha2"><input id="ns-senha2" type="password" placeholder="Repita a senha" autocomplete="new-password"></label></div>
+      <button class="btn-pill block" id="ns-btn" onclick="doUpdatePassword()">Salvar nova senha ${AUTH_ARROW}</button>
+    </div>
+  </div>`;
+}
+
 function renderWelcome(){
-  document.getElementById('app').innerHTML = welcomeView();
+  const views={welcome:welcomeView,login:loginView,cadastro:cadastroView,recuperar:recuperarSenhaView,'nova-senha':novaSenhaView};
+  const view=views[AUTH_SCREEN]||welcomeView;
+  document.getElementById('app').innerHTML = view();
 }
 
-/* Navegação preparada para a futura tela de Login/Cadastro (próxima Sprint).
-   Login ainda não existe: por ora, segue para o fluxo atual do app. */
 function iniciarFluxoLogin(){
-  render();
+  goAuth('login');
 }
 
-/* ---------- verificação de sessão Supabase ---------- */
+/* ---------- handlers de autenticação ---------- */
+async function withAuthBtn(btnId,textoCarregando,fn){
+  const btn=document.getElementById(btnId);
+  const original=btn.innerHTML;
+  btn.disabled=true; btn.textContent=textoCarregando;
+  try{ await fn(); }
+  finally{ const b=document.getElementById(btnId); if(b){ b.disabled=false; b.innerHTML=original; } }
+}
+async function doLogin(){
+  const email=val('li-email'), senha=val('li-senha');
+  if(!email||!senha){toast('Preencha e-mail e senha');return;}
+  if(!emailValido(email)){toast('Informe um e-mail válido');return;}
+  await withAuthBtn('li-btn','Entrando…',async()=>{
+    const auth=await window.__authReady;
+    const r=await auth.signIn(email,senha);
+    if(!r.ok) toast(r.error);
+  });
+}
+async function doSignUp(){
+  const email=val('cd-email'), senha=val('cd-senha'), senha2=val('cd-senha2');
+  if(!email||!senha||!senha2){toast('Preencha todos os campos');return;}
+  if(!emailValido(email)){toast('Informe um e-mail válido');return;}
+  if(senha.length<6){toast('A senha precisa ter pelo menos 6 caracteres');return;}
+  if(senha!==senha2){toast('As senhas não coincidem');return;}
+  await withAuthBtn('cd-btn','Criando conta…',async()=>{
+    const auth=await window.__authReady;
+    const r=await auth.signUp(email,senha);
+    if(!r.ok){ toast(r.error); return; }
+    if(r.precisaConfirmarEmail){
+      AUTH_MSG=`Enviamos um link de confirmação para ${email}. Abra seu e-mail para ativar sua conta.`;
+      AUTH_SCREEN='cadastro'; renderWelcome();
+    }
+    // se a confirmação de e-mail estiver desabilitada no projeto, a sessão já vem criada
+    // e o listener SIGNED_IN (registrarListenerAuth) leva para o app sozinho.
+  });
+}
+async function doResetPassword(){
+  const email=val('rs-email');
+  if(!email){toast('Informe seu e-mail');return;}
+  if(!emailValido(email)){toast('Informe um e-mail válido');return;}
+  await withAuthBtn('rs-btn','Enviando…',async()=>{
+    const auth=await window.__authReady;
+    const r=await auth.resetPasswordForEmail(email);
+    if(!r.ok){ toast(r.error); return; }
+    AUTH_MSG=`Enviamos um link de recuperação para ${email}. Abra seu e-mail para redefinir sua senha.`;
+    AUTH_SCREEN='recuperar'; renderWelcome();
+  });
+}
+async function doUpdatePassword(){
+  const senha=val('ns-senha'), senha2=val('ns-senha2');
+  if(!senha||!senha2){toast('Preencha os dois campos');return;}
+  if(senha.length<6){toast('A senha precisa ter pelo menos 6 caracteres');return;}
+  if(senha!==senha2){toast('As senhas não coincidem');return;}
+  await withAuthBtn('ns-btn','Salvando…',async()=>{
+    const auth=await window.__authReady;
+    const r=await auth.updatePassword(senha);
+    if(!r.ok){ toast(r.error); return; }
+    toast('Senha atualizada com sucesso');
+    AUTH_SCREEN='welcome'; render();
+  });
+}
+async function doLogout(){
+  const auth=await window.__authReady;
+  const r=await auth.signOut();
+  if(!r.ok){ toast(r.error); return; }
+  // o listener SIGNED_OUT (registrarListenerAuth) volta para a tela de boas-vindas.
+}
+
+/* ---------- verificação e reação a mudanças de sessão Supabase ---------- */
 async function verificarSessao(){
   try{
     const client = await Promise.race([
@@ -2433,10 +2605,28 @@ async function verificarSessao(){
     return false;
   }
 }
+async function registrarListenerAuth(){
+  try{
+    const auth = await Promise.race([
+      window.__authReady,
+      new Promise(resolve=>setTimeout(()=>resolve(null), 4000)),
+    ]);
+    if(!auth) return;
+    auth.onAuthStateChange((event)=>{
+      if(event==='PASSWORD_RECOVERY'){ AUTH_MSG=null; AUTH_SCREEN='nova-senha'; renderWelcome(); }
+      else if(event==='SIGNED_IN'){ AUTH_SCREEN='welcome'; render(); }
+      else if(event==='SIGNED_OUT'){ AUTH_MSG=null; AUTH_SCREEN='welcome'; renderWelcome(); }
+    });
+  }catch(e){
+    console.error('[Auth] erro ao registrar listener de sessão:', e);
+  }
+}
 
 /* ---------- boot ---------- */
 async function boot(){
   document.getElementById('app').innerHTML = splashView();
+  await registrarListenerAuth();
+  if(AUTH_SCREEN==='nova-senha'){ renderWelcome(); return; }
   const temSessao = await verificarSessao();
   if(temSessao) render();
   else renderWelcome();

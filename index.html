@@ -29,11 +29,13 @@
 <div class="app" id="app"></div>
 
 <script>
-  /* Ponte entre o módulo js/supabase.js (ESM) e o app.js (script clássico) */
+  /* Ponte entre os módulos js/supabase.js e js/auth.js (ESM) e o app.js (script clássico) */
   window.__supabaseReady = new Promise((resolve) => { window.__resolveSupabaseReady = resolve; });
+  window.__authReady = new Promise((resolve) => { window.__resolveAuthReady = resolve; });
 </script>
 <script src="app.js"></script>
 <script type="module" src="js/supabase.js"></script>
+<script type="module" src="js/auth.js"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
