@@ -4,7 +4,7 @@
    Sem dependencias externas, sem build step.
    ============================================================ */
 
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 const CACHE_NAME = `compasso-cache-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -16,6 +16,7 @@ const APP_SHELL = [
   '/js/supabase.js',
   '/js/auth.js',
   '/js/database.js',
+  '/js/notifications.js',
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
@@ -80,5 +81,19 @@ self.addEventListener('fetch', (event) => {
         return cached || network;
       })
     )
+  );
+});
+
+// Clique numa notificação (Sprint K): foca uma aba já aberta do Compasso,
+// ou abre uma nova se não houver nenhuma.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if ('focus' in client) return client.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow('/');
+    })
   );
 });

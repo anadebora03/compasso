@@ -23,9 +23,16 @@ function load(){
   try{const raw=store.get(KEY); if(raw) return JSON.parse(raw);}catch(e){}
   return null;
 }
-function save(){
+let DB=null; // API de sincronização (js/database.js), resolvida de forma assíncrona no boot
+let NOTIF=null; // API de lembretes (js/notifications.js), idem
+function persistLocal(){
   try{ if(!store.set(KEY,JSON.stringify(S))) toast('Salvo nesta sessão (armazenamento local indisponível aqui)'); }
   catch(e){ toast('Não foi possível salvar (armazenamento cheio)'); }
+}
+function save(){
+  persistLocal();
+  if(DB) DB.onLocalSave();
+  if(NOTIF && S) NOTIF.checkAndNotify(buildNotifStatus());
 }
 
 /* ---------- helpers ---------- */
@@ -775,6 +782,27 @@ function achievements(){
   ];
 }
 
+/* Snapshot só-leitura para js/notifications.js — reaproveita as mesmas funções
+   derivadas já usadas pelas telas. Lê S.dailyLogs[hoje] diretamente (não usa
+   todayLog(), que cria o registro do dia se não existir — isso poluiria S com
+   um dailyLog vazio toda vez que o app abrisse, mesmo sem o usuário ter feito
+   nada, e isso seria sincronizado como um registro real na Sprint J). */
+function buildNotifStatus(){
+  const L = (S.dailyLogs && S.dailyLogs[todayISO()]) || {};
+  const w = sortedWeigh();
+  const la = lastApp();
+  return {
+    diaAplicacao: S.profile.diaAplicacao,
+    ultimaAplicacaoDate: la ? la.date : null,
+    ultimaPesagemDate: w.length ? w[w.length-1].date : null,
+    aguaHoje: L.agua||0, metaAgua: S.profile.metaAgua,
+    proteinaHoje: L.proteina||0, metaProteina: S.profile.metaProteina,
+    agenda: S.agenda||[],
+    pen: penRemaining(),
+    achievements: achievements(),
+  };
+}
+
 /* ============================================================
    SHEETS (modais de registro)
    ============================================================ */
@@ -941,6 +969,56 @@ function cfgDadosSecao(){
       <span class="mais-item-text"><span class="mais-item-t">Apagar todos os dados</span><span class="mais-item-s">Remove permanentemente tudo o que você registrou</span></span>
     </button>`;
 }
+const NOTIF_TOGGLES=[
+  {id:'aplicacao',ic:'syringe',t:'Aplicação',s:'Lembrete no dia configurado'},
+  {id:'pesagem',ic:'scale',t:'Pesagem',s:'Conforme a frequência abaixo'},
+  {id:'agua',ic:'drop',t:'Água',s:'Distribuído ao longo do dia'},
+  {id:'proteina',ic:'flag',t:'Proteína',s:'Se a meta do dia ainda não foi batida'},
+  {id:'agenda',ic:'cal',t:'Agenda',s:'Consultas, retornos e outros compromissos'},
+  {id:'exames',ic:'flask',t:'Exames',s:'Exames marcados na agenda'},
+  {id:'caneta',ic:'gear',t:'Caneta',s:'Quando estiver perto de acabar'},
+  {id:'metas',ic:'medal',t:'Metas',s:'Parabéns ao bater uma meta ou conquista'},
+];
+function notifFreqField(freqAtual){
+  const opts=[{value:'semanal',label:'Semanal'},{value:'quinzenal',label:'Quinzenal'},{value:'mensal',label:'Mensal'}];
+  const idx=Math.max(0,opts.findIndex(o=>o.value===freqAtual));
+  return `<div class="csel">
+    <button type="button" class="field-wrap csel-trigger" onclick="toggleCombo('notif-freq')">
+      ${obIcon('cal')}<span class="csel-value" id="cselval-notif-freq">${opts[idx].label}</span>${OB_CHEV_DOWN}
+    </button>
+    <select id="notif-freq" class="csel-native" tabindex="-1">${opts.map((o,i)=>`<option value="${o.value}" ${i===idx?'selected':''}>${o.label}</option>`).join('')}</select>
+    <div class="csel-panel" id="cselpanel-notif-freq">${opts.map((o,i)=>`<div class="csel-opt ${i===idx?'sel':''}" onclick="pickCombo('notif-freq',${i});setNotifFreq('${o.value}')">${o.label}</div>`).join('')}</div>
+  </div>`;
+}
+function setNotifFreq(freq){
+  if(!NOTIF) return;
+  const prefs=NOTIF.loadPrefs(); prefs.pesagemFrequencia=freq; NOTIF.savePrefs(prefs);
+}
+function toggleNotifPref(key,val){
+  if(!NOTIF) return;
+  const prefs=NOTIF.loadPrefs(); prefs[key]=val; NOTIF.savePrefs(prefs);
+}
+function cfgNotificacoesSecao(){
+  const prefs = NOTIF ? NOTIF.loadPrefs() : {aplicacao:true,pesagem:true,agua:true,proteina:true,agenda:true,exames:true,caneta:true,metas:true,pesagemFrequencia:'semanal'};
+  const permissao = NOTIF ? NOTIF.permission : 'unsupported';
+  const permBanner = permissao==='granted' ? '' : `
+    <button type="button" class="mais-item" onclick="ativarNotificacoes()">
+      <span class="badge-glow amber">${icon('bell')}</span>
+      <span class="mais-item-text"><span class="mais-item-t">Ativar notificações</span><span class="mais-item-s">${permissao==='denied'?'Bloqueadas no navegador — ative nas configurações do dispositivo':'Toque para permitir lembretes do Compasso'}</span></span>
+    </button>`;
+  return `${permBanner}
+    ${NOTIF_TOGGLES.map(x=>`<label class="mais-item" style="cursor:pointer">
+        <span class="badge-glow">${icon(x.ic)}</span>
+        <span class="mais-item-text"><span class="mais-item-t">${x.t}</span><span class="mais-item-s">${x.s}</span></span>
+        <input type="checkbox" ${prefs[x.id]?'checked':''} onchange="toggleNotifPref('${x.id}',this.checked)" style="width:20px;height:20px;flex:0 0 auto;accent-color:var(--accent)">
+      </label>`).join('')}
+    <div class="glass-field" style="margin-top:14px"><label>Frequência da pesagem</label>${notifFreqField(prefs.pesagemFrequencia)}</div>`;
+}
+async function ativarNotificacoes(){
+  if(!NOTIF) return;
+  await NOTIF.requestPermission();
+  render();
+}
 /* Seções futuras (Conta, Privacidade, Integrações) entram aqui como
    cfgContaSecao(), cfgPrivacidadeSecao(), cfgIntegracoesSecao() —
    sem lógica própria enquanto as funcionalidades não existirem. */
@@ -955,6 +1033,8 @@ function configuracoesView(){
     ${cfgGroup('Preferências',cfgPreferenciasSecao(p,ic))}
 
     <button class="btn-pill block" onclick="savePerfil()">Salvar alterações</button>
+
+    ${cfgGroup('Notificações',cfgNotificacoesSecao(),'margin-top:14px')}
 
     ${cfgGroup('Dados',cfgDadosSecao(),'margin-top:14px;margin-bottom:2px')}`;
 }
@@ -1007,44 +1087,49 @@ function apSetHumor(n){
 function saveApp(){
   const date=tmp.date||todayISO(), dose=val('ap-dose'), med=val('ap-med'), local=tmp.local, obs=val('ap-obs');
   if(!date||!dose){toast('Preencha data e dose');return;}
-  S.applications.push({date,dose,medicamento:med,local,obs});
+  S.applications.push({id:crypto.randomUUID(),date,dose,medicamento:med,local,obs});
   if(document.getElementById('ap-pen').checked && S.pen.capacidadeMg) S.pen.usadas=(S.pen.usadas||0)+1;
   S.profile.doseAtual=dose; S.profile.medicamento=med;
   if(tmp.humor) todayLog().humor=tmp.humor;
+  if(date===todayISO() && NOTIF) NOTIF.cancelAplicacaoHoje();
   save();closeSheet();toast('Aplicação registrada 💧');render();
 }
 function savePesagem(){
   const date=val('pw-date'), peso=numBR(val('pw-peso'));
   if(!date||!peso){toast('Informe data e peso');return;}
-  const rec={date,peso};
+  const prev=S.weighings.find(w=>w.date===date);
+  const rec={id:prev?prev.id:crypto.randomUUID(),date,peso};
   ['cintura','quadril','abdomen','coxa','braco'].forEach(k=>{const v=numBR(val('pw-'+k));if(v)rec[k]=v;});
   const file=document.getElementById('pw-foto').files[0];
   const finish=()=>{ // substitui pesagem do mesmo dia se existir
     S.weighings=S.weighings.filter(w=>w.date!==date); S.weighings.push(rec);
+    if(date===todayISO() && NOTIF) NOTIF.cancelPesagemHoje();
     save();closeSheet();toast('Pesagem salva');render();
   };
   if(file){ downscale(file,700,dataUrl=>{rec.foto=dataUrl;finish();}); }
   else finish();
 }
 function savePen(){
-  S.pen={capacidadeMg:numBR(val('pn-cap'))||0,doseMg:numBR(val('pn-dose'))||0,usadas:parseInt(val('pn-used'))||0};
+  const prevId=S.pen&&S.pen.id;
+  S.pen={id:prevId||crypto.randomUUID(),capacidadeMg:numBR(val('pn-cap'))||0,doseMg:numBR(val('pn-dose'))||0,usadas:parseInt(val('pn-used'))||0};
   save();closeSheet();toast('Caneta atualizada');render();
 }
 function saveExame(){
   const tipo=val('ex-tipo'),date=val('ex-date'),valor=val('ex-val');
   if(!valor){toast('Informe o resultado');return;}
-  S.exams.push({tipo,date,valor});save();closeSheet();toast('Exame guardado');render();
+  S.exams.push({id:crypto.randomUUID(),tipo,date,valor});save();closeSheet();toast('Exame guardado');render();
 }
 function saveCompromisso(){
-  S.agenda.push({tipo:val('cp-tipo'),date:val('cp-date'),obs:val('cp-obs')});
+  S.agenda.push({id:crypto.randomUUID(),tipo:val('cp-tipo'),date:val('cp-date'),obs:val('cp-obs')});
   save();closeSheet();toast('Compromisso agendado');render();
 }
 function saveBio(){
   if(!S.bio)S.bio=[];
   const date=val('bi-date');
-  const rec={date};
+  const prev=S.bio.find(b=>b.date===date);
+  const rec={id:prev?prev.id:crypto.randomUUID(),date};
   ['gordura','massaMagra','musculo','agua','visceral','tmb'].forEach(k=>{const v=numBR(val('bi-'+k));if(v!=null)rec[k]=v;});
-  if(Object.keys(rec).length<2){toast('Preencha ao menos um valor');return;}
+  if(Object.keys(rec).length<3){toast('Preencha ao menos um valor');return;}
   S.bio=S.bio.filter(b=>b.date!==date); S.bio.push(rec);
   save();closeSheet();toast('Bioimpedância registrada');render();
 }
@@ -2605,6 +2690,37 @@ async function verificarSessao(){
     return false;
   }
 }
+async function initDatabase(){
+  try{
+    DB = await Promise.race([
+      window.__databaseReady,
+      new Promise(resolve=>setTimeout(()=>resolve(null), 4000)),
+    ]);
+    if(DB) DB.init({
+      getState:()=>S,
+      applyRemote:(mutate)=>{ S=mutate(S); persistLocal(); render(); },
+    });
+  }catch(e){
+    console.error('[Sync] erro ao inicializar camada de dados:', e);
+  }
+}
+let notifListenerBound=false;
+async function initNotifications(){
+  try{
+    NOTIF = await Promise.race([
+      window.__notificationsReady,
+      new Promise(resolve=>setTimeout(()=>resolve(null), 4000)),
+    ]);
+  }catch(e){
+    console.error('[Notificações] erro ao inicializar:', e);
+  }
+  if(NOTIF && !notifListenerBound){
+    notifListenerBound = true;
+    document.addEventListener('visibilitychange', ()=>{
+      if(document.visibilityState==='visible' && S) NOTIF.checkAndNotify(buildNotifStatus());
+    });
+  }
+}
 async function registrarListenerAuth(){
   try{
     const auth = await Promise.race([
@@ -2612,10 +2728,10 @@ async function registrarListenerAuth(){
       new Promise(resolve=>setTimeout(()=>resolve(null), 4000)),
     ]);
     if(!auth) return;
-    auth.onAuthStateChange((event)=>{
+    auth.onAuthStateChange((event,session)=>{
       if(event==='PASSWORD_RECOVERY'){ AUTH_MSG=null; AUTH_SCREEN='nova-senha'; renderWelcome(); }
-      else if(event==='SIGNED_IN'){ AUTH_SCREEN='welcome'; render(); }
-      else if(event==='SIGNED_OUT'){ AUTH_MSG=null; AUTH_SCREEN='welcome'; renderWelcome(); }
+      else if(event==='SIGNED_IN'){ AUTH_SCREEN='welcome'; if(DB) DB.setUser(session&&session.user&&session.user.id); render(); }
+      else if(event==='SIGNED_OUT'){ AUTH_MSG=null; AUTH_SCREEN='welcome'; if(DB) DB.setUser(null); renderWelcome(); }
     });
   }catch(e){
     console.error('[Auth] erro ao registrar listener de sessão:', e);
@@ -2625,10 +2741,19 @@ async function registrarListenerAuth(){
 /* ---------- boot ---------- */
 async function boot(){
   document.getElementById('app').innerHTML = splashView();
+  await initDatabase();
+  await initNotifications();
   await registrarListenerAuth();
   if(AUTH_SCREEN==='nova-senha'){ renderWelcome(); return; }
   const temSessao = await verificarSessao();
-  if(temSessao) render();
-  else renderWelcome();
+  if(temSessao){
+    if(DB){
+      const client = await window.__supabaseReady;
+      const {data} = await client.auth.getSession();
+      DB.setUser(data&&data.session&&data.session.user&&data.session.user.id);
+    }
+    render();
+    if(NOTIF && S) NOTIF.checkAndNotify(buildNotifStatus());
+  } else renderWelcome();
 }
 boot();
