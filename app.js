@@ -28,6 +28,7 @@ let NOTIF=null; // API de lembretes (js/notifications.js), idem
 let INSIGHTS=null; // API de análise (js/insights.js), idem
 let TIMELINE=null; // API da linha do tempo (js/timeline.js), idem
 let ACTIONPLAN=null; // API do plano de ação (js/actionplan.js), idem
+let GOALS=null; // API de metas da jornada (js/goals.js), idem
 function persistLocal(){
   try{ if(!store.set(KEY,JSON.stringify(S))) toast('Salvo nesta sessão (armazenamento local indisponível aqui)'); }
   catch(e){ toast('Não foi possível salvar (armazenamento cheio)'); }
@@ -342,7 +343,9 @@ function imcSeries(){
        pois não há uma jornada de perda válida pra medir progresso.
      - resultado sempre limitado a [0,100]: perdeu mais que a meta não deve passar de 100%,
        e ganho de peso (atual > ini) não deve virar percentual negativo.
-   Ajustar aqui a fórmula é suficiente — o único consumidor é evEvolutionCard(). */
+   Ajustar aqui a fórmula é suficiente — consumido por evEvolutionCard() e por
+   buildGoalsContext() (js/goals.js, Sprint O), que passa o resultado pronto
+   pra meta "Peso-alvo" sem recalcular nada. */
 function goalProgressPct(){
   const ini=S.profile.pesoInicial, meta=S.profile.pesoMeta, atual=currentWeight();
   const total=ini-meta;
@@ -519,6 +522,7 @@ function maisView(){
       {id:'conquistas',t:'Conquistas',s:'Marcos do tratamento',ic:'medal',amber:true},
       {id:'insights',t:'Insights',s:'Padrões cruzados dos seus registros',ic:'chart'},
       {id:'planoacao',t:'Plano de Ação',s:'O que revisar na próxima consulta',ic:'flag'},
+      {id:'metas',t:'Metas da Jornada',s:'Seu progresso em cada objetivo',ic:'check'},
     ]],
     ['Saúde',[
       {id:'bio',t:'Bioimpedância',s:'Composição corporal ao longo do tempo',ic:'pulse'},
@@ -556,6 +560,7 @@ function maisSubView(sub){
   if(sub==='jornada') return back+journeyView();
   if(sub==='insights') return back+insightsView();
   if(sub==='planoacao') return back+planoAcaoView();
+  if(sub==='metas') return back+metasView();
   if(sub==='conquistas') return back+achView();
   if(sub==='timeline') return back+timelineView();
   if(sub==='bio') return back+bioView();
@@ -645,6 +650,28 @@ function avancarStatusAcao(id){
   const proximo = acao.status==='nova' ? 'em_acompanhamento' : 'resolvida';
   ACTIONPLAN.atualizarStatus(acao, proximo);
   render();
+}
+
+const META_TONE={estagnada:'rose',concluida:'',em_andamento:'amber',nao_iniciada:''};
+const META_STATUS_LABEL={nao_iniciada:'Não iniciada',em_andamento:'Em andamento',concluida:'Concluída',estagnada:'Estagnada'};
+function metasView(){
+  const metas=GOALS ? GOALS.gerar(buildGoalsContext()) : [];
+  return `<div class="scr-title" style="margin-bottom:6px">Metas da Jornada</div>
+  <div class="scr-sub">Seu progresso em cada objetivo, com base nos seus registros.</div>
+  <div class="card mt14"><div class="list">
+    ${metas.length?metas.map(m=>`<div class="item" style="align-items:flex-start">
+      <div class="badge-ico ${META_TONE[m.status]}">${icon(m.status==='concluida'?'check':'flag')}</div>
+      <div style="flex:1">
+        <div class="t">${esc(m.titulo)}</div>
+        <div class="row" style="gap:10px;margin:6px 0 4px">
+          <div class="bar-glass" style="flex:1"><span style="width:${m.percentual>0?Math.max(3,m.percentual):0}%"></span></div>
+          <span style="font-size:12px;font-weight:700;color:var(--accent-light)">${m.percentual}%</span>
+        </div>
+        <div class="s">${META_STATUS_LABEL[m.status]} · ${esc(m.proximaEtapa)}</div>
+      </div>
+    </div>`).join('')
+      :'<p class="muted center" style="font-size:13px;padding:8px 0">Registre alguns dados para começar a acompanhar suas metas.</p>'}
+  </div></div>`;
 }
 
 function achView(){
@@ -1907,6 +1934,23 @@ function buildActionPlanContext(){
   };
 }
 
+/* Contexto para js/goals.js — não recalcula nada: reaproveita coletaDados(),
+   achievements(), goalProgressPct() e daysTreat() (todos já existentes), mais
+   INSIGHTS.gerar() só pra checar presença de regra (sinal de estagnação) ou
+   ler `assinatura` já pronta (ex. adesao_semanal). */
+function buildGoalsContext(){
+  return {
+    profile: S.profile,
+    d: coletaDados(S.profile.dataInicio, todayISO()),
+    weighings: S.weighings, applications: S.applications, exams: S.exams, bio: S.bio||[],
+    achievements: achievements(),
+    insights: INSIGHTS ? INSIGHTS.gerar(buildInsightContext(S.profile.dataInicio, todayISO()), {registrarHistorico:false}) : [],
+    notifPrefs: NOTIF ? NOTIF.loadPrefs() : null,
+    pesoProgressoPct: goalProgressPct(),
+    diasTreat: daysTreat(),
+  };
+}
+
 /* -------- resumo automático -------- */
 function gerarResumo(d,ini,fim){
   const frases=[];
@@ -2361,6 +2405,27 @@ ${(()=>{
   </div>`;
 })()}
 
+<!-- EVOLUÇÃO DAS METAS (opcional — em andamento, concluídas recentes e estagnadas) -->
+${(()=>{
+  if(!GOALS) return '';
+  const ach=achievements();
+  const concluidaRecente=(m)=>{
+    if(m.status!=='concluida') return false;
+    if(m.categoria!=='marco') return true; // ex.: peso-alvo — estado sempre atual, sem data de conquista pra checar
+    const a=ach.find(x=>x.t===m.titulo.replace('Marco: ',''));
+    return !!(a && a.date && daysBetween(a.date, todayISO())<=21);
+  };
+  const metas = GOALS.gerar(buildGoalsContext()).filter(m=>m.status==='em_andamento'||m.status==='estagnada'||concluidaRecente(m));
+  if(!metas.length) return '';
+  return `<div class="section">
+    <div class="section-head"><span class="dot"></span><span class="section-title">Evolução das metas</span></div>
+    ${metas.map(m=>`<div class="insight" style="margin-bottom:10px">
+      <div class="insight-t">${esc(m.titulo)} — ${m.percentual}%</div>
+      <p>${esc(m.proximaEtapa)} <span style="color:var(--gray)">${META_STATUS_LABEL[m.status]}</span></p>
+    </div>`).join('')}
+  </div>`;
+})()}
+
 <!-- RESUMO AUTOMÁTICO -->
 <div class="insight">
   <div class="insight-t">Resumo automático</div>
@@ -2706,6 +2771,16 @@ async function initActionplan(){
     console.error('[ActionPlan] erro ao inicializar:', e);
   }
 }
+async function initGoals(){
+  try{
+    GOALS = await Promise.race([
+      window.__goalsReady,
+      new Promise(resolve=>setTimeout(()=>resolve(null), 4000)),
+    ]);
+  }catch(e){
+    console.error('[Goals] erro ao inicializar:', e);
+  }
+}
 async function registrarListenerAuth(){
   try{
     const auth = await Promise.race([
@@ -2731,6 +2806,7 @@ async function boot(){
   await initInsights();
   await initTimeline();
   await initActionplan();
+  await initGoals();
   await registrarListenerAuth();
   if(AUTH_SCREEN==='nova-senha'){ renderWelcome(); return; }
   const temSessao = await verificarSessao();

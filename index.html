@@ -38,6 +38,7 @@
   window.__insightsReady = new Promise((resolve) => { window.__resolveInsightsReady = resolve; });
   window.__timelineReady = new Promise((resolve) => { window.__resolveTimelineReady = resolve; });
   window.__actionplanReady = new Promise((resolve) => { window.__resolveActionplanReady = resolve; });
+  window.__goalsReady = new Promise((resolve) => { window.__resolveGoalsReady = resolve; });
 </script>
 <script src="app.js"></script>
 <script type="module" src="js/supabase.js"></script>
@@ -47,6 +48,7 @@
 <script type="module" src="js/insights.js"></script>
 <script type="module" src="js/timeline.js"></script>
 <script type="module" src="js/actionplan.js"></script>
+<script type="module" src="js/goals.js"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
