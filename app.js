@@ -25,6 +25,7 @@ function load(){
 }
 let DB=null; // API de sincronização (js/database.js), resolvida de forma assíncrona no boot
 let NOTIF=null; // API de lembretes (js/notifications.js), idem
+let INSIGHTS=null; // API de análise (js/insights.js), idem
 function persistLocal(){
   try{ if(!store.set(KEY,JSON.stringify(S))) toast('Salvo nesta sessão (armazenamento local indisponível aqui)'); }
   catch(e){ toast('Não foi possível salvar (armazenamento cheio)'); }
@@ -254,7 +255,8 @@ function inicioView(){
   `;
 }
 function topInsight(){
-  const ins=buildInsights();
+  const ctx=buildInsightContext(S.profile.dataInicio, todayISO());
+  const ins=INSIGHTS ? INSIGHTS.gerar(ctx,{registrarHistorico:false}) : [];
   if(!ins.length){
     return `<div class="gcard tight" style="margin-top:14px">
       <div class="eyebrow2">Acompanhamento</div>
@@ -264,10 +266,11 @@ function topInsight(){
   }
   const i=ins[0];
   const toneCls=i.tone==='amber'?'warn':i.tone==='rose'?'danger':'';
+  const care=[i.justificativa,i.care].filter(Boolean).join(' ');
   return `<div class="gcard tight" style="margin-top:14px">
     <div class="eyebrow2">Insight da semana</div>
-    <div class="insight2 ${toneCls}"><span class="ico">${icon('spark')}</span>
-    <p>${i.text}${i.care?`<span class="care">${i.care}</span>`:''}</p></div>
+    <div class="insight2 ${toneCls}"><span class="ico">${icon(i.icon||'spark')}</span>
+    <p>${i.text}${care?`<span class="care">${care}</span>`:''}</p></div>
     <button class="btn-pill block ghost btn-sm" onclick="go('mais','insights')">Ver todos os insights</button></div>`;
 }
 
@@ -605,12 +608,14 @@ function careCard(){
 }
 
 function insightsView(){
-  const ins=buildInsights();
+  const ctx=buildInsightContext(S.profile.dataInicio, todayISO());
+  const ins=INSIGHTS ? INSIGHTS.gerar(ctx) : [];
   return `<div class="scr-title" style="margin-bottom:6px">Insights</div>
   <div class="scr-sub">Padrões observados nos seus registros. Servem para você se conhecer melhor e não substituem a orientação do seu médico e nutricionista.</div>
   ${careCard()}
-  ${ins.length?ins.map(i=>`<div class="insight ${i.tone}"><span class="ico">${icon(i.icon||'spark')}</span>
-    <p>${i.text}${i.care?`<span class="care">${i.care}</span>`:''}</p></div>`).join('')
+  ${ins.length?ins.map(i=>{const care=[i.justificativa,i.care].filter(Boolean).join(' ');
+    return `<div class="insight ${i.tone}"><span class="ico">${icon(i.icon||'spark')}</span>
+    <p>${i.text}${care?`<span class="care">${care}</span>`:''}</p></div>`;}).join('')
     :'<div class="card center muted" style="font-size:13px">Registre alguns dias no diário para começarmos a encontrar padrões.</div>'}`;
 }
 
@@ -704,61 +709,10 @@ function agendaView(){
 }
 
 /* ============================================================
-   INSIGHTS (motor local, descritivo — nunca prescritivo)
+   INSIGHTS — motor centralizado em js/insights.js (Sprint L).
+   insightsView()/topInsight() consomem via INSIGHTS.gerar();
+   nenhuma regra de análise vive mais aqui.
    ============================================================ */
-function buildInsights(){
-  const out=[];
-  const w=sortedWeigh();
-  // 1. tendência de peso 4 semanas
-  if(w.length>=2){
-    const recent=w.filter(x=>daysAgo(x.date)<=28);
-    if(recent.length>=2){
-      const d=+(recent[0].peso-recent[recent.length-1].peso).toFixed(1);
-      if(d>0) out.push({tone:'',icon:'chart',text:`Você perdeu <b>${nf(d)} kg</b> nas últimas quatro semanas.`});
-    }
-  }
-  // 2. sintoma x aplicação
-  const days=Object.entries(S.dailyLogs);
-  const appDates=new Set(S.applications.map(a=>a.date));
-  let nearNausea=0, nearTotal=0;
-  days.forEach(([iso,l])=>{
-    // dia seguinte a aplicação?
-    const prev=todayISO(new Date(parseISO(iso).getTime()-864e5));
-    if(appDates.has(prev)){nearTotal++; if((l.sintomas||[]).includes('Náusea'))nearNausea++;}
-  });
-  if(nearTotal>=2 && nearNausea/nearTotal>=0.5)
-    out.push({tone:'',icon:'spark',text:`Você costuma registrar <b>náusea no dia seguinte à aplicação</b>. Refeições mais leves nesse dia podem ajudar.`});
-  // 3. constipação persistente -> encaminhar médico
-  const recentDays=days.filter(([iso])=>daysAgo(iso)<=21).map(([,l])=>l);
-  const constip=recentDays.filter(l=>(l.sintomas||[]).includes('Constipação')).length;
-  if(constip>=3)
-    out.push({tone:'rose',icon:'alert',text:`Você relatou <b>constipação em ${constip} dias</b> nas últimas semanas.`,
-      care:'Se estiver persistindo ou piorando, vale conversar com seu médico ou nutricionista.'});
-  // 4. hidratação
-  const waterDays=recentDays.filter(l=>l.agua!=null&&l.agua>0);
-  if(waterDays.length>=3){
-    const avg=waterDays.reduce((s,l)=>s+l.agua,0)/waterDays.length;
-    if(avg<S.profile.metaAgua*0.8)
-      out.push({tone:'amber',icon:'drop',text:`Sua hidratação recente (média de <b>${nf(avg)} L/dia</b>) está abaixo da sua meta de ${nf(S.profile.metaAgua)} L. Beber mais água ajuda a reduzir efeitos como constipação e fadiga.`});
-  }
-  // 5. proteína
-  const protDays=recentDays.filter(l=>l.proteina>0);
-  if(protDays.length>=3){
-    const avg=protDays.reduce((s,l)=>s+l.proteina,0)/protDays.length;
-    if(avg<S.profile.metaProteina*0.75)
-      out.push({tone:'',icon:'spark',text:`Sua ingestão de proteína (média de <b>${Math.round(avg)} g/dia</b>) está abaixo da meta. Manter a proteína preserva massa muscular durante a perda de peso.`});
-  }
-  // 6. bioimpedância: tendência de massa magra
-  if(S.bio&&S.bio.length>=2){
-    const b=[...S.bio].sort((x,y)=>x.date<y.date?-1:1);
-    const dLean=+((b[b.length-1].massaMagra||0)-(b[0].massaMagra||0)).toFixed(1);
-    const dFat=+((b[b.length-1].gordura||0)-(b[0].gordura||0)).toFixed(1);
-    if(dFat<0) out.push({tone:'',icon:'pulse',text:`Seu percentual de gordura caiu <b>${nf(Math.abs(dFat))} pontos</b> desde a primeira bioimpedância.`});
-    if(dLean<-1) out.push({tone:'amber',icon:'pulse',text:`Sua massa magra reduziu cerca de <b>${nf(Math.abs(dLean))} kg</b> no período. Priorizar proteína e treino de força ajuda a preservar músculo durante o tratamento.`,
-      care:'Se a perda de massa magra continuar, vale conversar com seu nutricionista e seu médico.'});
-  }
-  return out;
-}
 
 /* ============================================================
    CONQUISTAS
@@ -1878,6 +1832,19 @@ function coletaDados(ini,fim){
     contSint,mediaHumor,apetiteDom,na,lastAppObj};
 }
 
+/* Contexto para js/insights.js — reaproveita coletaDados() (nunca recalcula
+   o que já existe). `allApplications`/`achievements` ficam fora do recorte de
+   período de propósito: "há quantas semanas usando X" ou "aumentou a dose"
+   são fatos sobre agora, não sobre um intervalo arbitrário de relatório. */
+function buildInsightContext(ini,fim){
+  return {
+    d: coletaDados(ini,fim),
+    profile: S.profile,
+    allApplications: S.applications,
+    achievements: achievements(),
+  };
+}
+
 /* -------- resumo automático -------- */
 function gerarResumo(d,ini,fim){
   const frases=[];
@@ -2406,6 +2373,19 @@ ${tl.length?`<div class="section">
   </div>
 </div>`:''}
 
+<!-- INSIGHTS DO PERÍODO (só os mais relevantes, não todos) -->
+${(()=>{
+  const insPeriodo = INSIGHTS ? INSIGHTS.gerar(buildInsightContext(ini,fim),{registrarHistorico:false}).slice(0,5) : [];
+  if(!insPeriodo.length) return '';
+  return `<div class="section">
+    <div class="section-head"><span class="dot"></span><span class="section-title">Insights do período</span></div>
+    ${insPeriodo.map(i=>`<div class="insight" style="margin-bottom:10px">
+      <div class="insight-t">${i.categoria}</div>
+      <p>${i.text} <span style="color:var(--gray)">${i.justificativa}</span></p>
+    </div>`).join('')}
+  </div>`;
+})()}
+
 <!-- RESUMO AUTOMÁTICO -->
 <div class="insight">
   <div class="insight-t">Resumo automático</div>
@@ -2721,6 +2701,16 @@ async function initNotifications(){
     });
   }
 }
+async function initInsights(){
+  try{
+    INSIGHTS = await Promise.race([
+      window.__insightsReady,
+      new Promise(resolve=>setTimeout(()=>resolve(null), 4000)),
+    ]);
+  }catch(e){
+    console.error('[Insights] erro ao inicializar:', e);
+  }
+}
 async function registrarListenerAuth(){
   try{
     const auth = await Promise.race([
@@ -2743,6 +2733,7 @@ async function boot(){
   document.getElementById('app').innerHTML = splashView();
   await initDatabase();
   await initNotifications();
+  await initInsights();
   await registrarListenerAuth();
   if(AUTH_SCREEN==='nova-senha'){ renderWelcome(); return; }
   const temSessao = await verificarSessao();

@@ -4,7 +4,7 @@
    Sem dependencias externas, sem build step.
    ============================================================ */
 
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const CACHE_NAME = `compasso-cache-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -17,6 +17,7 @@ const APP_SHELL = [
   '/js/auth.js',
   '/js/database.js',
   '/js/notifications.js',
+  '/js/insights.js',
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',

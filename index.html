@@ -29,18 +29,20 @@
 <div class="app" id="app"></div>
 
 <script>
-  /* Ponte entre os módulos js/supabase.js, js/auth.js, js/database.js e
-     js/notifications.js (ESM) e o app.js (script clássico) */
+  /* Ponte entre os módulos js/supabase.js, js/auth.js, js/database.js,
+     js/notifications.js e js/insights.js (ESM) e o app.js (script clássico) */
   window.__supabaseReady = new Promise((resolve) => { window.__resolveSupabaseReady = resolve; });
   window.__authReady = new Promise((resolve) => { window.__resolveAuthReady = resolve; });
   window.__databaseReady = new Promise((resolve) => { window.__resolveDatabaseReady = resolve; });
   window.__notificationsReady = new Promise((resolve) => { window.__resolveNotificationsReady = resolve; });
+  window.__insightsReady = new Promise((resolve) => { window.__resolveInsightsReady = resolve; });
 </script>
 <script src="app.js"></script>
 <script type="module" src="js/supabase.js"></script>
 <script type="module" src="js/auth.js"></script>
 <script type="module" src="js/database.js"></script>
 <script type="module" src="js/notifications.js"></script>
+<script type="module" src="js/insights.js"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
