@@ -36,6 +36,7 @@
   window.__databaseReady = new Promise((resolve) => { window.__resolveDatabaseReady = resolve; });
   window.__notificationsReady = new Promise((resolve) => { window.__resolveNotificationsReady = resolve; });
   window.__insightsReady = new Promise((resolve) => { window.__resolveInsightsReady = resolve; });
+  window.__timelineReady = new Promise((resolve) => { window.__resolveTimelineReady = resolve; });
 </script>
 <script src="app.js"></script>
 <script type="module" src="js/supabase.js"></script>
@@ -43,6 +44,7 @@
 <script type="module" src="js/database.js"></script>
 <script type="module" src="js/notifications.js"></script>
 <script type="module" src="js/insights.js"></script>
+<script type="module" src="js/timeline.js"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

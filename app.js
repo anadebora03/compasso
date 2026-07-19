@@ -26,6 +26,7 @@ function load(){
 let DB=null; // API de sincronização (js/database.js), resolvida de forma assíncrona no boot
 let NOTIF=null; // API de lembretes (js/notifications.js), idem
 let INSIGHTS=null; // API de análise (js/insights.js), idem
+let TIMELINE=null; // API da linha do tempo (js/timeline.js), idem
 function persistLocal(){
   try{ if(!store.set(KEY,JSON.stringify(S))) toast('Salvo nesta sessão (armazenamento local indisponível aqui)'); }
   catch(e){ toast('Não foi possível salvar (armazenamento cheio)'); }
@@ -628,15 +629,19 @@ function achView(){
 }
 
 function timelineView(){
-  const ev=[];
-  ev.push({date:S.profile.dataInicio,txt:'Início do tratamento · '+nf(S.profile.pesoInicial)+' kg',tone:'amber'});
-  S.applications.forEach(a=>ev.push({date:a.date,txt:'Aplicação · '+esc(a.dose)+' '+esc(S.profile.unidade)+' · '+esc(a.local),tone:''}));
-  sortedWeigh().forEach((w,i)=>{if(i>0)ev.push({date:w.date,txt:'Pesagem · '+nf(w.peso)+' kg',tone:''});});
-  achievements().filter(a=>a.on&&a.date).forEach(a=>ev.push({date:a.date,txt:'Conquista · '+a.t,tone:'amber'}));
-  ev.sort((a,b)=>a.date<b.date?1:-1);
+  const TONE_POR_CATEGORIA={tratamento:'amber',dose:'amber',conquistas:'amber'};
+  const ev=TIMELINE ? TIMELINE.gerar(buildTimelineContext()) : [];
+  const ordenado=[...ev].reverse(); // motor devolve cronológico ascendente; tela mostra mais recente primeiro
   return `<div class="scr-title" style="margin-bottom:14px">Linha do tempo</div>
   <div class="card"><div class="tl">
-    ${ev.slice(0,40).map(e=>`<div class="ev ${e.tone}"><div class="d">${fmtBRy(e.date)}</div><div class="txt">${e.txt}</div></div>`).join('')}
+    ${ordenado.slice(0,40).map(e=>{
+      const futuro = e.categoria==='agenda' && e.payload && e.payload.futuro;
+      const tone = futuro ? 'future' : (TONE_POR_CATEGORIA[e.categoria]||'');
+      const badge = futuro ? (()=>{const d=daysBetween(todayISO(),e.data);
+        return ` <span class="faint" style="font-weight:700">· ${d===1?'amanhã':'em '+d+'d'}</span>`;})() : '';
+      return `<div class="ev ${tone}"><div class="d">${fmtBRy(e.data)}</div><div class="txt">${e.titulo} · ${e.descricao}${badge}</div></div>`;
+    }).join('')
+      ||'<p class="muted center" style="font-size:13px;padding:8px 0">Ainda não há eventos suficientes para montar a linha do tempo.</p>'}
   </div></div>`;
 }
 
@@ -1845,6 +1850,23 @@ function buildInsightContext(ini,fim){
   };
 }
 
+/* Contexto para js/timeline.js — ao contrário do de insights, não passa por
+   coletaDados() (que filtra por período; a timeline é a narrativa inteira,
+   quem quiser um recorte usa opts.ini/opts.fim de TIMELINE.gerar()). */
+function buildTimelineContext(){
+  return {
+    profile: S.profile,
+    applications: S.applications,
+    weighings: S.weighings,
+    exams: S.exams,
+    bio: S.bio||[],
+    agenda: S.agenda,
+    dailyLogs: S.dailyLogs,
+    achievements: achievements(),
+    insightsHistorico: INSIGHTS ? INSIGHTS.listarHistorico() : [],
+  };
+}
+
 /* -------- resumo automático -------- */
 function gerarResumo(d,ini,fim){
   const frases=[];
@@ -1877,24 +1899,6 @@ function gerarResumo(d,ini,fim){
   return frases.join(' ');
 }
 
-/* -------- linha do tempo de eventos -------- */
-function gerarTimeline(d,ini,fim){
-  const evs=[];
-  d.apps.forEach(a=>evs.push({date:a.date,txt:`Aplicação de ${esc(a.dose)} ${esc(S.profile.unidade)} (${esc(a.local)})`}));
-  d.w.forEach(pw=>evs.push({date:pw.date,txt:`Peso registrado: ${nf(pw.peso)} kg`}));
-  d.bio.forEach(b=>evs.push({date:b.date,txt:'Bioimpedância realizada'}));
-  d.logs.forEach(l=>{
-    const sint=(l.sintomas||[]).filter(s=>s!=='Sem sintomas');
-    if(sint.length) evs.push({date:l.date,txt:'Sintomas: '+sint.join(', ')});
-    if(l.agua>=S.profile.metaAgua) evs.push({date:l.date,txt:'Meta de hidratação atingida'});
-    if(l.proteina>=S.profile.metaProteina) evs.push({date:l.date,txt:'Meta proteica atingida'});
-  });
-  // deduplica por data+txt
-  const seen=new Set(), out=[];
-  evs.sort((a,b)=>a.date<b.date?-1:1).forEach(e=>{const k=e.date+'|'+e.txt;if(!seen.has(k)){seen.add(k);out.push(e);}});
-  return out;
-}
-
 /* ============================================================
    GERADOR PDF CANVAS · A4 retrato, unidades em pontos (pt)
    Canvas nativo, sem bibliotecas externas.
@@ -1915,93 +1919,6 @@ function gerarRelatorio(){
   },80);
 }
 
-/* ---- buildSections: monta as seções lógicas do relatório ---- */
-function buildSections(d,ini,fim){
-  const p=S.profile;
-  const na=d.na;
-  const falta=+(currentWeight()-p.pesoMeta).toFixed(1);
-  const sec=[];
-
-  sec.push({type:'header',paciente:p.nome,periodo:`${fmtBRy(ini)} a ${fmtBRy(fim)}`,
-    emissao:fmtBRy(todayISO()),diasPeriodo:daysBetween(ini,fim)+1});
-
-  sec.push({type:'section',title:'Medicação'});
-  sec.push({type:'kv2',rows:[
-    ['Medicamento',esc(p.medicamento),'Dose atual',esc(p.doseAtual)+' '+esc(p.unidade)],
-    ['Frequência','1× por semana','Aplicações no período',String(d.apps.length)],
-    ['Última aplicação',d.lastAppObj?fmtBRy(d.lastAppObj.date):'—','Próxima aplicação',na.days===0?'Hoje':WD[p.diaAplicacao]+', '+fmtBRy(na.date)],
-  ]});
-
-  sec.push({type:'section',title:'Evolução do peso'});
-  sec.push({type:'peso3',ini:nf(d.pesoIniPeriod),fim:nf(d.pesoFimPeriod),var:d.varPeso});
-  sec.push({type:'kv2',rows:[
-    ['Peso inicial do tratamento',nf(p.pesoInicial)+' kg','Peso atual',nf(d.pesoFimPeriod)+' kg'],
-    ['Peso meta',nf(p.pesoMeta)+' kg','Falta para a meta',falta>0?nf(falta)+' kg':'✓ Meta atingida'],
-  ]});
-  if(d.w.length>=2) sec.push({type:'lineChart',data:d.w.map(w=>({x:w.date,y:w.peso})),goal:p.pesoMeta});
-
-  if(d.diasTotal>0){
-    sec.push({type:'section',title:'Hidratação'});
-    sec.push({type:'kv2',rows:[
-      ['Meta diária',nf(p.metaAgua)+' L','Média diária registrada',nf(d.mediaAgua)+' L'],
-      ['Dias com meta atingida',d.metaAguaAtingida+' de '+d.diasTotal,'Dias registrados',String(d.diasTotal)],
-    ]});
-  }
-
-  if(d.mediaProt>0){
-    sec.push({type:'section',title:'Meta Proteica'});
-    sec.push({type:'protBar',meta:p.metaProteina,media:d.mediaProt,adesao:d.adesaoProt});
-  }
-
-  const diasHumor=d.logs.filter(l=>l.humor>0);
-  if(diasHumor.length>0){
-    sec.push({type:'section',title:'Check-in'});
-    const H=['','Muito baixo','Baixo','Moderado','Bom','Muito bom'];
-    const rows=[];
-    if(d.mediaHumor>0) rows.push(['Humor médio',H[Math.round(d.mediaHumor)]||'—']);
-    if(d.apetiteDom)    rows.push(['Apetite predominante',d.apetiteDom]);
-    sec.push({type:'kv1',rows});
-  }
-
-  sec.push({type:'section',title:'Sintomas'});
-  const sintomasTodos=['Náusea','Azia','Vômito','Constipação','Diarreia','Dor de cabeça','Fadiga','Gases'];
-  const comSint=sintomasTodos.filter(s=>d.contSint[s]>0).map(s=>[s,d.contSint[s]+' dia(s)']);
-  if(comSint.length===0) sec.push({type:'empty',msg:'Nenhum sintoma registrado no período.'});
-  else sec.push({type:'kv1',rows:comSint});
-
-  if(d.bio&&d.bio.length>=2){
-    sec.push({type:'section',title:'Bioimpedância — Comparativo'});
-    const bf=d.bio[0],bl=d.bio[d.bio.length-1];
-    const bfields=[['gordura','Gordura corporal','%'],['massaMagra','Massa magra','kg'],
-      ['musculo','Massa muscular','kg'],['agua','Água corporal','%'],
-      ['visceral','Gordura visceral',''],['tmb','Metabolismo basal','kcal']];
-    const brows=[];
-    bfields.forEach(([k,lbl,u])=>{if(bf[k]!=null||bl[k]!=null)
-      brows.push([lbl,(bf[k]!=null?nf(bf[k])+' '+u:'—')+' → '+(bl[k]!=null?nf(bl[k])+' '+u:'—')]);});
-    sec.push({type:'bio2',rows:brows,datas:[fmtBRy(bf.date),fmtBRy(bl.date)]});
-  } else if(d.bio&&d.bio.length===1){
-    sec.push({type:'section',title:'Bioimpedância'});
-    const b=d.bio[0];const rows=[];
-    if(b.gordura!=null)   rows.push(['Gordura corporal',nf(b.gordura)+'%']);
-    if(b.massaMagra!=null)rows.push(['Massa magra',nf(b.massaMagra)+' kg']);
-    if(b.musculo!=null)   rows.push(['Massa muscular',nf(b.musculo)+' kg']);
-    if(b.visceral!=null)  rows.push(['Gordura visceral',String(b.visceral)]);
-    if(b.tmb!=null)       rows.push(['Metabolismo basal',nf(b.tmb,0)+' kcal']);
-    sec.push({type:'kv1',rows,note:'Apenas 1 registro no período — comparativo indisponível.'});
-  }
-
-  const tl=gerarTimeline(d,ini,fim);
-  if(tl.length){
-    sec.push({type:'section',title:'Linha do tempo'});
-    sec.push({type:'timeline',events:tl.slice(0,20)});
-  }
-
-  sec.push({type:'section',title:'Resumo automático'});
-  sec.push({type:'resumo',text:gerarResumo(d,ini,fim)});
-  sec.push({type:'footer'});
-  return sec;
-}
-
 /* ============================================================
    buildPDF + mostrarPreview · HTML com @media print A4
    Abre numa nova aba; window.print() gera PDF A4 perfeito.
@@ -2015,7 +1932,12 @@ function buildPDF(d,ini,fim){
   const diasHumor=d.logs.filter(l=>l.humor>0);
   const sintomasTodos=['Náusea','Azia','Vômito','Constipação','Diarreia','Dor de cabeça','Fadiga','Gases'];
   const comSint=sintomasTodos.filter(s=>d.contSint[s]>0);
-  const tl=gerarTimeline(d,ini,fim);
+  const tlPeriodo = TIMELINE ? TIMELINE.gerar(buildTimelineContext(),{ini,fim}) : [];
+  // no relatório, só os mais relevantes do período (não todos) — mesmo princípio já usado pros insights,
+  // mas reordenados de volta pra cronológico depois de escolhidos, pra continuar lendo como narrativa
+  const tl = tlPeriodo.length>25
+    ? [...tlPeriodo].sort((a,b)=>a.prioridade-b.prioridade).slice(0,25).sort((a,b)=>a.data<b.data?-1:1)
+    : tlPeriodo;
 
   /* gráfico SVG inline */
   function sparkSVG(weighings){
@@ -2368,8 +2290,8 @@ ${bioSec()}
 <!-- LINHA DO TEMPO -->
 ${tl.length?`<div class="section">
   <div class="section-head"><span class="dot"></span><span class="section-title">Linha do tempo</span></div>
-  <div class="tl">${tl.slice(0,25).map(e=>`
-    <div class="te"><div class="te-d">${fmtBRy(e.date)}</div><div class="te-t">${e.txt}</div></div>`).join('')}
+  <div class="tl">${tl.map(e=>`
+    <div class="te"><div class="te-d">${fmtBRy(e.data)}</div><div class="te-t">${e.titulo} — ${e.descricao}</div></div>`).join('')}
   </div>
 </div>`:''}
 
@@ -2711,6 +2633,16 @@ async function initInsights(){
     console.error('[Insights] erro ao inicializar:', e);
   }
 }
+async function initTimeline(){
+  try{
+    TIMELINE = await Promise.race([
+      window.__timelineReady,
+      new Promise(resolve=>setTimeout(()=>resolve(null), 4000)),
+    ]);
+  }catch(e){
+    console.error('[Timeline] erro ao inicializar:', e);
+  }
+}
 async function registrarListenerAuth(){
   try{
     const auth = await Promise.race([
@@ -2734,6 +2666,7 @@ async function boot(){
   await initDatabase();
   await initNotifications();
   await initInsights();
+  await initTimeline();
   await registrarListenerAuth();
   if(AUTH_SCREEN==='nova-senha'){ renderWelcome(); return; }
   const temSessao = await verificarSessao();
