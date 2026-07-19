@@ -158,6 +158,24 @@ async function requestPermission(){
   catch(e){ return 'denied'; }
 }
 
+/* Só leitura: monta a mesma lista de elegíveis que checkAndNotify usa
+   internamente, mas sem marcar nada em compasso_notif_state_v1 e sem
+   chamar show() — nenhuma notificação de sistema é disparada. Existe
+   pra outros motores (Sprint N, js/actionplan.js) poderem perguntar "o
+   que está devido agora" sem o efeito colateral de checkAndNotify, que
+   foi desenhado pra um propósito diferente (empurrar UMA notificação
+   push e marcar como mostrada). Nenhuma regra de REMINDER_TYPES muda. */
+function listarElegiveis(status){
+  const prefs = loadPrefs();
+  const elegiveis = [];
+  for(const [type, check] of Object.entries(REMINDER_TYPES)){
+    if(!prefs[type]) continue;
+    const due = check({...status, pesagemFrequencia:prefs.pesagemFrequencia});
+    if(due) elegiveis.push({type, ...due});
+  }
+  return elegiveis;
+}
+
 /* ---------- ponto de entrada único ----------
    Gera todos os lembretes elegíveis, ordena por prioridade e mostra só o
    mais importante — nunca vários de uma vez ao abrir o app. Os demais
@@ -213,7 +231,7 @@ function cancel(key){
 function cancelAplicacaoHoje(){ cancel(`aplicacao-${todayISO()}`); }
 function cancelPesagemHoje(){ cancel(`pesagem-${todayISO()}`); }
 
-const notifApi = {checkAndNotify, requestPermission, cancel, cancelAplicacaoHoje, cancelPesagemHoje, loadPrefs, savePrefs, get permission(){ return typeof Notification!=='undefined'?Notification.permission:'unsupported'; }};
+const notifApi = {checkAndNotify, listarElegiveis, requestPermission, cancel, cancelAplicacaoHoje, cancelPesagemHoje, loadPrefs, savePrefs, get permission(){ return typeof Notification!=='undefined'?Notification.permission:'unsupported'; }};
 
 if(window.__resolveNotificationsReady) window.__resolveNotificationsReady(notifApi);
 else window.__notificationsReady = Promise.resolve(notifApi);

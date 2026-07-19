@@ -27,6 +27,7 @@ let DB=null; // API de sincronização (js/database.js), resolvida de forma ass�
 let NOTIF=null; // API de lembretes (js/notifications.js), idem
 let INSIGHTS=null; // API de análise (js/insights.js), idem
 let TIMELINE=null; // API da linha do tempo (js/timeline.js), idem
+let ACTIONPLAN=null; // API do plano de ação (js/actionplan.js), idem
 function persistLocal(){
   try{ if(!store.set(KEY,JSON.stringify(S))) toast('Salvo nesta sessão (armazenamento local indisponível aqui)'); }
   catch(e){ toast('Não foi possível salvar (armazenamento cheio)'); }
@@ -517,6 +518,7 @@ function maisView(){
       {id:'timeline',t:'Linha do tempo',s:'Todos os eventos em ordem',ic:'clock'},
       {id:'conquistas',t:'Conquistas',s:'Marcos do tratamento',ic:'medal',amber:true},
       {id:'insights',t:'Insights',s:'Padrões cruzados dos seus registros',ic:'chart'},
+      {id:'planoacao',t:'Plano de Ação',s:'O que revisar na próxima consulta',ic:'flag'},
     ]],
     ['Saúde',[
       {id:'bio',t:'Bioimpedância',s:'Composição corporal ao longo do tempo',ic:'pulse'},
@@ -553,6 +555,7 @@ function maisSubView(sub){
   const back=`<button class="btn btn-outline btn-sm" onclick="go('mais')" style="margin-bottom:14px">${icon('chevron',false,true)} Voltar</button>`;
   if(sub==='jornada') return back+journeyView();
   if(sub==='insights') return back+insightsView();
+  if(sub==='planoacao') return back+planoAcaoView();
   if(sub==='conquistas') return back+achView();
   if(sub==='timeline') return back+timelineView();
   if(sub==='bio') return back+bioView();
@@ -618,6 +621,30 @@ function insightsView(){
     return `<div class="insight ${i.tone}"><span class="ico">${icon(i.icon||'spark')}</span>
     <p>${i.text}${care?`<span class="care">${care}</span>`:''}</p></div>`;}).join('')
     :'<div class="card center muted" style="font-size:13px">Registre alguns dias no diário para começarmos a encontrar padrões.</div>'}`;
+}
+
+const PLANO_TONE={alta:'rose',media:'amber',baixa:''};
+const PLANO_STATUS_LABEL={nova:'Nova',em_acompanhamento:'Em acompanhamento',resolvida:'Resolvida'};
+function planoAcaoView(){
+  const acoes=ACTIONPLAN ? ACTIONPLAN.gerar(buildActionPlanContext()) : [];
+  return `<div class="scr-title" style="margin-bottom:6px">Plano de Ação</div>
+  <div class="scr-sub">O que revisar na próxima consulta, a partir dos seus registros. Não substitui a orientação do seu médico e nutricionista.</div>
+  <div class="card mt14"><div class="list">
+    ${acoes.length?acoes.map(a=>`<div class="item">
+      <div class="badge-ico ${PLANO_TONE[a.prioridade]}">${icon('flag')}</div>
+      <div><div class="t">${esc(a.titulo)}</div><div class="s">${esc(a.motivo)} ${esc(a.descricao)}</div></div>
+      <div class="r" style="font-size:11px">${PLANO_STATUS_LABEL[a.status]}${a.status!=='resolvida'?`<br><button class="btn btn-outline btn-sm" style="margin-top:4px" onclick="avancarStatusAcao('${esc(a.id)}')">Avançar</button>`:''}</div>
+    </div>`).join('')
+      :'<p class="muted center" style="font-size:13px;padding:8px 0">Nenhuma ação pendente no momento — tudo em dia.</p>'}
+  </div></div>`;
+}
+function avancarStatusAcao(id){
+  if(!ACTIONPLAN) return;
+  const acao=ACTIONPLAN.gerar(buildActionPlanContext()).find(a=>a.id===id);
+  if(!acao) return;
+  const proximo = acao.status==='nova' ? 'em_acompanhamento' : 'resolvida';
+  ACTIONPLAN.atualizarStatus(acao, proximo);
+  render();
 }
 
 function achView(){
@@ -1867,6 +1894,19 @@ function buildTimelineContext(){
   };
 }
 
+/* Contexto para js/actionplan.js — não recalcula nada: lê o que INSIGHTS e
+   NOTIF já produzem (chamando os dois motores de novo, mas sem reimplementar
+   regra nenhuma) e só passa dado bruto pros dois coletores locais novos
+   (ausência de aplicação, bioimpedância antiga). */
+function buildActionPlanContext(){
+  return {
+    insights: INSIGHTS ? INSIGHTS.gerar(buildInsightContext(S.profile.dataInicio, todayISO()), {registrarHistorico:false}) : [],
+    notifElegiveis: NOTIF ? NOTIF.listarElegiveis(buildNotifStatus()) : [],
+    applications: S.applications,
+    bio: S.bio||[],
+  };
+}
+
 /* -------- resumo automático -------- */
 function gerarResumo(d,ini,fim){
   const frases=[];
@@ -2308,6 +2348,19 @@ ${(()=>{
   </div>`;
 })()}
 
+<!-- PLANO DE ACOMPANHAMENTO (opcional — só ações abertas e de alta prioridade) -->
+${(()=>{
+  const acoesAlta = ACTIONPLAN ? ACTIONPLAN.gerar(buildActionPlanContext()).filter(a=>a.prioridade==='alta' && a.status!=='resolvida') : [];
+  if(!acoesAlta.length) return '';
+  return `<div class="section">
+    <div class="section-head"><span class="dot"></span><span class="section-title">Plano de acompanhamento</span></div>
+    ${acoesAlta.map(a=>`<div class="insight" style="margin-bottom:10px">
+      <div class="insight-t">${esc(a.titulo)}</div>
+      <p>${esc(a.descricao)} <span style="color:var(--gray)">${esc(a.motivo)}</span></p>
+    </div>`).join('')}
+  </div>`;
+})()}
+
 <!-- RESUMO AUTOMÁTICO -->
 <div class="insight">
   <div class="insight-t">Resumo automático</div>
@@ -2643,6 +2696,16 @@ async function initTimeline(){
     console.error('[Timeline] erro ao inicializar:', e);
   }
 }
+async function initActionplan(){
+  try{
+    ACTIONPLAN = await Promise.race([
+      window.__actionplanReady,
+      new Promise(resolve=>setTimeout(()=>resolve(null), 4000)),
+    ]);
+  }catch(e){
+    console.error('[ActionPlan] erro ao inicializar:', e);
+  }
+}
 async function registrarListenerAuth(){
   try{
     const auth = await Promise.race([
@@ -2667,6 +2730,7 @@ async function boot(){
   await initNotifications();
   await initInsights();
   await initTimeline();
+  await initActionplan();
   await registrarListenerAuth();
   if(AUTH_SCREEN==='nova-senha'){ renderWelcome(); return; }
   const temSessao = await verificarSessao();
