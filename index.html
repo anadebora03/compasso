@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#14352E">
+<meta name="theme-color" content="#0B1526">
 <meta name="description" content="Compasso · companheiro de tratamento com análogos de GLP-1. Aplicações, peso, medidas, sintomas e evolução em um diário digital.">
 <title>Compasso · Companheiro de tratamento GLP-1</title>
 
@@ -38,7 +38,7 @@
   window.__insightsReady = new Promise((resolve) => { window.__resolveInsightsReady = resolve; });
   window.__timelineReady = new Promise((resolve) => { window.__resolveTimelineReady = resolve; });
   window.__actionplanReady = new Promise((resolve) => { window.__resolveActionplanReady = resolve; });
-  window.__goalsReady = new Promise((resolve) => { window.__resolveGoalsReady = resolve; });
+  window.__licenseReady = new Promise((resolve) => { window.__resolveLicenseReady = resolve; });
 </script>
 <script src="app.js"></script>
 <script type="module" src="js/supabase.js"></script>
@@ -48,7 +48,7 @@
 <script type="module" src="js/insights.js"></script>
 <script type="module" src="js/timeline.js"></script>
 <script type="module" src="js/actionplan.js"></script>
-<script type="module" src="js/goals.js"></script>
+<script type="module" src="js/license.js"></script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {

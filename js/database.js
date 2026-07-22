@@ -35,6 +35,16 @@ let host = null; // {getState(), applyRemote(mutatorFn)} — fornecido por app.j
 let userId = null;
 let debounceTimer = null;
 let syncing = false;
+/* Permissão de sincronizar (Sprint P — licenciamento). database.js nunca
+   verifica plano — só recebe um booleano já decidido de app.js (o único
+   lugar que fala com js/license.js) via setSyncAllowed(). Começa true:
+   até a licença carregar, nada aqui deve regredir por acidente. Único
+   ponto de checagem: syncNow()/migrateIfNeeded(), os dois chokepoints
+   por onde TODO caminho de sync passa (onLocalSave, listeners de
+   online/visibilitychange, e o pós-login) — gatear aqui, não em cada
+   gatilho separado, é o que garante que nenhum caminho escape. */
+let syncAllowed = true;
+function setSyncAllowed(v){ syncAllowed = !!v; }
 
 function loadMeta(){ try{ return JSON.parse(localStorage.getItem(META_KEY)) || {}; }catch(e){ return {}; } }
 function saveMeta(m){ try{ localStorage.setItem(META_KEY, JSON.stringify(m)); }catch(e){} }
@@ -275,7 +285,7 @@ async function pullAll(){
 
 /* ---------- migração automática (primeiro login com banco vazio) ---------- */
 async function migrateIfNeeded(){
-  if(!userId) return;
+  if(!userId || !syncAllowed) return;
   try{ if(localStorage.getItem(MIGRATED_KEY) === userId) return; }catch(e){}
   const {count, error} = await supabase.from('profiles').select('id', {count:'exact', head:true}).eq('id', userId);
   if(error) return; // sem rede/erro: tenta de novo no próximo boot, não bloqueia o app
@@ -307,7 +317,7 @@ function scheduleSync(){
   debounceTimer = setTimeout(()=>{ syncNow(); }, DEBOUNCE_MS);
 }
 async function syncNow(){
-  if(!userId || !navigator.onLine) return;
+  if(!userId || !navigator.onLine || !syncAllowed) return;
   await withSyncLock(async ()=>{ await pushAll(); await pullAll(); });
 }
 
@@ -333,7 +343,7 @@ function setUser(uid){
   migrateIfNeeded().then(syncNow);
 }
 
-const dbApi = {init, onLocalSave, syncNow, setUser};
+const dbApi = {init, onLocalSave, syncNow, setUser, setSyncAllowed};
 
 if(window.__resolveDatabaseReady) window.__resolveDatabaseReady(dbApi);
 else window.__databaseReady = Promise.resolve(dbApi);

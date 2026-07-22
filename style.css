@@ -1,5 +1,5 @@
   :root{
-    --ink:#14352E; --ink-soft:#4A6159; --ink-faint:#8AA097;
+    --ink:#14352E; --ink-soft:#4A6159; --ink-faint:#5C6F67;
     --bg:#ECF0EA; --card:#FFFFFF;
     --green:#1F7A5C; --green-deep:#12604A; --green-soft:#D6E8DE;
     --amber:#D99A2B; --amber-soft:#F6E8CB;
@@ -442,7 +442,7 @@
 
   .cal-hdr{display:flex;align-items:center;justify-content:space-between;padding:6px 6px 10px}
   .cal-title{font-size:14px;font-weight:600;color:var(--tx-1)}
-  .cal-nav{width:30px;height:30px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  .cal-nav{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;
     color:var(--tx-2);transition:background var(--dur-fast) var(--ease-out)}
   .cal-nav:hover{background:var(--nv-glass-strong)}
   .cal-week{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;padding:0 4px;margin-bottom:2px}

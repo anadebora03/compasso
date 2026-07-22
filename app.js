@@ -28,7 +28,8 @@ let NOTIF=null; // API de lembretes (js/notifications.js), idem
 let INSIGHTS=null; // API de análise (js/insights.js), idem
 let TIMELINE=null; // API da linha do tempo (js/timeline.js), idem
 let ACTIONPLAN=null; // API do plano de ação (js/actionplan.js), idem
-let GOALS=null; // API de metas da jornada (js/goals.js), idem
+let LICENSE=null; // API de licenciamento (js/license.js), idem
+let FEATURES=null; // catálogo de recursos do motor de licenciamento — nunca strings soltas
 function persistLocal(){
   try{ if(!store.set(KEY,JSON.stringify(S))) toast('Salvo nesta sessão (armazenamento local indisponível aqui)'); }
   catch(e){ toast('Não foi possível salvar (armazenamento cheio)'); }
@@ -153,8 +154,8 @@ let EV_TAB='peso';
 function evSetTab(t){EV_TAB=t;render();}
 function render(){
   const app=document.getElementById('app');
-  if(!S){ app.innerHTML=obView(); bindOb(); return; }
-  const premiumScreen=QP_TABS.includes(TAB)||(TAB==='mais'&&(SUB===null||SUB==='relatorio'));
+  if(!S){ app.innerHTML=obView(); return; }
+  const premiumScreen=QP_TABS.includes(TAB)||(TAB==='mais'&&(SUB===null||SUB==='relatorio'))||TAB==='premium';
   app.innerHTML = topView() + `<div class="screen ${premiumScreen?'':'legacy'}" id="scr"></div>` + navView();
   const scr=document.getElementById('scr');
   let html='';
@@ -164,8 +165,8 @@ function render(){
   else if(TAB==='diario') html=diarioView();
   else if(TAB==='mais') html=SUB?maisSubView(SUB):maisView();
   else if(TAB==='proteina') html=proteinaView();
+  else if(TAB==='premium') html=premiumView();
   scr.innerHTML=html;
-  bindScreen();
 }
 
 /* ---------- Topbar ---------- */
@@ -258,6 +259,13 @@ function inicioView(){
   `;
 }
 function topInsight(){
+  if(FEATURES && LICENSE && !LICENSE.can(FEATURES.INSIGHTS)){
+    return `<div class="gcard tight" style="margin-top:14px">
+      <div class="eyebrow2">Insights automáticos</div>
+      <div class="insight2"><span class="ico">${icon('medal')}</span>
+      <p>Padrões identificados automaticamente nos seus registros — recurso Premium.<span class="care">Assine pra desbloquear.</span></p></div>
+      <button class="btn-pill block ghost btn-sm" onclick="go('premium')">Ver planos Premium</button></div>`;
+  }
   const ctx=buildInsightContext(S.profile.dataInicio, todayISO());
   const ins=INSIGHTS ? INSIGHTS.gerar(ctx,{registrarHistorico:false}) : [];
   if(!ins.length){
@@ -343,9 +351,7 @@ function imcSeries(){
        pois não há uma jornada de perda válida pra medir progresso.
      - resultado sempre limitado a [0,100]: perdeu mais que a meta não deve passar de 100%,
        e ganho de peso (atual > ini) não deve virar percentual negativo.
-   Ajustar aqui a fórmula é suficiente — consumido por evEvolutionCard() e por
-   buildGoalsContext() (js/goals.js, Sprint O), que passa o resultado pronto
-   pra meta "Peso-alvo" sem recalcular nada. */
+   Ajustar aqui a fórmula é suficiente — o único consumidor é evEvolutionCard(). */
 function goalProgressPct(){
   const ini=S.profile.pesoInicial, meta=S.profile.pesoMeta, atual=currentWeight();
   const total=ini-meta;
@@ -429,9 +435,9 @@ function evolucaoView(){
     <div class="between"><span class="eyebrow2" style="margin:0">Fotos de evolução</span>
     <button class="btn-pill btn-sm ghost" onclick="openSheet('pesar')">Adicionar</button></div>
     ${photos.length?`<div class="gallery" style="margin-top:12px">
-      ${photos.length>=2?`<div class="photo"><img src="${photos[0].foto}"><span class="cap">Antes · ${fmtBR(photos[0].date)}</span></div>
-      <div class="photo"><img src="${photos[photos.length-1].foto}"><span class="cap">Agora · ${fmtBR(photos[photos.length-1].date)}</span></div>`
-      :`<div class="photo"><img src="${photos[0].foto}"><span class="cap">${fmtBR(photos[0].date)}</span></div>`}
+      ${photos.length>=2?`<div class="photo"><img src="${photos[0].foto}" alt="Foto de evolução antes, ${fmtBR(photos[0].date)}"><span class="cap">Antes · ${fmtBR(photos[0].date)}</span></div>
+      <div class="photo"><img src="${photos[photos.length-1].foto}" alt="Foto de evolução agora, ${fmtBR(photos[photos.length-1].date)}"><span class="cap">Agora · ${fmtBR(photos[photos.length-1].date)}</span></div>`
+      :`<div class="photo"><img src="${photos[0].foto}" alt="Foto de evolução, ${fmtBR(photos[0].date)}"><span class="cap">${fmtBR(photos[0].date)}</span></div>`}
     </div>`:`<p style="font-size:13px;padding:10px 0;color:var(--tx-3);text-align:center">Nenhuma foto ainda. Uma foto por mês já mostra bastante diferença.</p>`}
   </div>`;
 }
@@ -522,7 +528,6 @@ function maisView(){
       {id:'conquistas',t:'Conquistas',s:'Marcos do tratamento',ic:'medal',amber:true},
       {id:'insights',t:'Insights',s:'Padrões cruzados dos seus registros',ic:'chart'},
       {id:'planoacao',t:'Plano de Ação',s:'O que revisar na próxima consulta',ic:'flag'},
-      {id:'metas',t:'Metas da Jornada',s:'Seu progresso em cada objetivo',ic:'check'},
     ]],
     ['Saúde',[
       {id:'bio',t:'Bioimpedância',s:'Composição corporal ao longo do tempo',ic:'pulse'},
@@ -558,11 +563,10 @@ function maisView(){
 function maisSubView(sub){
   const back=`<button class="btn btn-outline btn-sm" onclick="go('mais')" style="margin-bottom:14px">${icon('chevron',false,true)} Voltar</button>`;
   if(sub==='jornada') return back+journeyView();
-  if(sub==='insights') return back+insightsView();
-  if(sub==='planoacao') return back+planoAcaoView();
-  if(sub==='metas') return back+metasView();
+  if(sub==='insights') return back+renderComGate(FEATURES?.INSIGHTS, insightsView);
+  if(sub==='planoacao') return back+renderComGate(FEATURES?.ACTION_PLAN, planoAcaoView);
   if(sub==='conquistas') return back+achView();
-  if(sub==='timeline') return back+timelineView();
+  if(sub==='timeline') return back+renderComGate(FEATURES?.TIMELINE, timelineView);
   if(sub==='bio') return back+bioView();
   if(sub==='relatorio') return relatorioView(); /* cabeçalho próprio (Quiet Premium), sem o "Voltar" legado */
   if(sub==='stats') return back+statsView();
@@ -652,26 +656,87 @@ function avancarStatusAcao(id){
   render();
 }
 
-const META_TONE={estagnada:'rose',concluida:'',em_andamento:'amber',nao_iniciada:''};
-const META_STATUS_LABEL={nao_iniciada:'Não iniciada',em_andamento:'Em andamento',concluida:'Concluída',estagnada:'Estagnada'};
-function metasView(){
-  const metas=GOALS ? GOALS.gerar(buildGoalsContext()) : [];
-  return `<div class="scr-title" style="margin-bottom:6px">Metas da Jornada</div>
-  <div class="scr-sub">Seu progresso em cada objetivo, com base nos seus registros.</div>
-  <div class="card mt14"><div class="list">
-    ${metas.length?metas.map(m=>`<div class="item" style="align-items:flex-start">
-      <div class="badge-ico ${META_TONE[m.status]}">${icon(m.status==='concluida'?'check':'flag')}</div>
-      <div style="flex:1">
-        <div class="t">${esc(m.titulo)}</div>
-        <div class="row" style="gap:10px;margin:6px 0 4px">
-          <div class="bar-glass" style="flex:1"><span style="width:${m.percentual>0?Math.max(3,m.percentual):0}%"></span></div>
-          <span style="font-size:12px;font-weight:700;color:var(--accent-light)">${m.percentual}%</span>
-        </div>
-        <div class="s">${META_STATUS_LABEL[m.status]} · ${esc(m.proximaEtapa)}</div>
-      </div>
-    </div>`).join('')
-      :'<p class="muted center" style="font-size:13px;padding:8px 0">Registre alguns dados para começar a acompanhar suas metas.</p>'}
-  </div></div>`;
+/* ---------- gating (Sprint P — licenciamento) ----------
+   Nenhuma tela verifica plano diretamente: renderComGate() é o único
+   ponto que decide entre mostrar a tela real ou o aviso Premium
+   contextual. Falha aberto (mostra a tela) se LICENSE ainda não
+   carregou — nunca bloqueia por causa de uma inicialização lenta. */
+function renderComGate(feature, montarTela){
+  if(!LICENSE || LICENSE.can(feature)) return montarTela();
+  return premiumGateView(feature);
+}
+const FEATURE_BENEFICIO={
+  timeline:{titulo:'Timeline Inteligente', desc:'Veja toda a sua jornada organizada em uma linha do tempo única — aplicações, pesagens, exames e conquistas, tudo em ordem.'},
+  insights:{titulo:'Insights automáticos', desc:'Padrões identificados automaticamente nos seus registros, sem precisar analisar nada manualmente.'},
+  actionPlan:{titulo:'Plano de Ação personalizado', desc:'Saiba exatamente o que revisar na próxima consulta, priorizado pra você.'},
+  reports:{titulo:'Relatórios em PDF', desc:'Gere relatórios completos da sua evolução pra levar ao médico ou nutricionista.'},
+  backup:{titulo:'Backup em nuvem', desc:'Seus dados protegidos e sincronizados entre dispositivos.'},
+};
+function premiumGateView(feature){
+  const b=FEATURE_BENEFICIO[feature]||{titulo:'Recurso Premium', desc:'Esse recurso faz parte do plano Premium do Compasso.'};
+  return `<div class="card center" style="padding:32px 20px">
+    <div class="badge-ico amber" style="margin:0 auto 14px">${icon('medal')}</div>
+    <div class="scr-title" style="font-size:19px;margin-bottom:6px">${esc(b.titulo)}</div>
+    <p class="muted" style="font-size:13.5px;margin-bottom:18px">${esc(b.desc)}</p>
+    <button class="btn btn-primary btn-block" onclick="go('premium')">Ver planos Premium</button>
+  </div>`;
+}
+
+/* Preços placeholder — decisão de negócio, trivial de trocar aqui quando
+   definida. Sem cobrança real nesta sprint (ver assinarPlano()). */
+const PRECOS={monthly:'R$ 29,90/mês', yearly:'R$ 239,90/ano'};
+let PREMIUM_VALIDANDO=false;
+function premiumView(){
+  const plano=LICENSE?LICENSE.getPlan():'free';
+  const status=LICENSE?LICENSE.getStatus():'active';
+  const beneficios=['Timeline Inteligente','Insights automáticos','Plano de Ação personalizado','Relatórios em PDF','Backup em nuvem','Recursos futuros inclusos'];
+  return `
+  <div class="ap-head">
+    <button type="button" class="ap-back" onclick="go('mais')" aria-label="Voltar">${CAL_CHEV_L}</button>
+    <span class="ap-title">Compasso Premium</span>
+    <span class="ap-head-spacer"></span>
+  </div>
+  <p class="scr-sub" style="margin-top:-6px">Desbloqueie todo o potencial do seu acompanhamento.</p>
+
+  ${plano!=='free'?`<div class="gcard tight" style="margin-bottom:16px"><div class="between">
+    <div><div class="eyebrow2" style="margin:0">Seu plano atual</div><div style="font-size:15px;font-weight:700;color:var(--tx-1);margin-top:4px">${plano==='monthly'?'Premium Mensal':'Premium Anual'}</div></div>
+    <span class="badge-ico ${status==='active'?'':'amber'}">${icon('check')}</span>
+  </div></div>`:''}
+
+  <div class="gcard tight" style="margin-bottom:16px">
+    <div class="eyebrow2">O que você desbloqueia</div>
+    ${beneficios.map(b=>`<div class="row" style="gap:10px;padding:8px 0"><span style="color:var(--accent-light)">${icon('check')}</span><span style="font-size:13.5px;color:var(--tx-2)">${esc(b)}</span></div>`).join('')}
+  </div>
+
+  <div class="gcard tight" style="border:1.5px solid var(--accent);position:relative;margin-bottom:12px">
+    <span style="position:absolute;top:-10px;right:14px;font-size:10.5px;font-weight:800;color:#fff;background:var(--accent);padding:3px 10px;border-radius:999px">MAIS POPULAR</span>
+    <div class="eyebrow2">Premium Anual</div>
+    <div style="font-size:22px;font-weight:800;color:var(--tx-1);margin:4px 0 2px">${PRECOS.yearly}</div>
+    <p style="font-size:12.5px;color:var(--tx-3);margin-bottom:14px">Equivale a menos por mês do que o plano mensal.</p>
+    <button class="btn-pill block" onclick="assinarPlano('yearly')">Assinar plano anual</button>
+  </div>
+
+  <div class="gcard tight" style="margin-bottom:18px">
+    <div class="eyebrow2">Premium Mensal</div>
+    <div style="font-size:22px;font-weight:800;color:var(--tx-1);margin:4px 0 2px">${PRECOS.monthly}</div>
+    <p style="font-size:12.5px;color:var(--tx-3);margin-bottom:14px">Cancele quando quiser.</p>
+    <button class="btn btn-outline btn-block" onclick="assinarPlano('monthly')">Assinar plano mensal</button>
+  </div>
+
+  <button class="btn btn-outline btn-block" onclick="restaurarCompraPremium()">${PREMIUM_VALIDANDO?'Validando…':'Restaurar compra'}</button>
+  <p class="muted center" style="font-size:11.5px;margin-top:14px">A cobrança ainda não está disponível nesta versão do app.</p>`;
+}
+function assinarPlano(plano){
+  toast('Assinatura ainda não disponível nesta versão — em breve!');
+}
+async function restaurarCompraPremium(){
+  if(!LICENSE || PREMIUM_VALIDANDO) return;
+  PREMIUM_VALIDANDO=true; render();
+  const resultado=await LICENSE.refresh();
+  PREMIUM_VALIDANDO=false;
+  atualizarPermissaoDeSync();
+  toast(resultado.plan!=='free' ? 'Assinatura restaurada!' : 'Nenhuma assinatura encontrada.');
+  render();
 }
 
 function achView(){
@@ -847,8 +912,9 @@ function sheetBody(id){
     tmp.humor=tmp.humor||todayLog().humor||0;
     const meds=['Ozempic','Wegovy','Mounjaro','Zepbound','Saxenda','Outro'];
     const medIdx=Math.max(0,meds.indexOf(S.profile.medicamento));
-    return `<div class="ap-head">
-        <button type="button" class="ap-back" onclick="closeSheet()">${CAL_CHEV_L}</button>
+    return `<div class="grab"></div>
+      <div class="ap-head">
+        <button type="button" class="ap-back" onclick="closeSheet()" aria-label="Fechar">${CAL_CHEV_L}</button>
         <span class="ap-title">Nova aplicação</span>
         <span class="ap-head-spacer"></span>
       </div>
@@ -879,49 +945,49 @@ function sheetBody(id){
   }
   if(id==='pesar'){
     return `<h2>Nova pesagem</h2><p class="sub">Peso, medidas e uma foto (opcional).</p>
-      <div class="field-2"><div class="field"><label>Data</label><input type="date" id="pw-date" value="${todayISO()}"></div>
-      <div class="field"><label>Peso (kg)</label><input id="pw-peso" inputmode="decimal" placeholder="${nf(currentWeight())}"></div></div>
+      <div class="field-2"><div class="field"><label for="pw-date">Data</label><input type="date" id="pw-date" value="${todayISO()}"></div>
+      <div class="field"><label for="pw-peso">Peso (kg)</label><input id="pw-peso" inputmode="decimal" placeholder="${nf(currentWeight())}"></div></div>
       <div class="eyebrow" style="margin:6px 0 8px">Medidas (cm) · opcional</div>
-      <div class="field-2"><div class="field"><label>Cintura</label><input id="pw-cintura" inputmode="decimal"></div>
-      <div class="field"><label>Quadril</label><input id="pw-quadril" inputmode="decimal"></div></div>
-      <div class="field-2"><div class="field"><label>Abdômen</label><input id="pw-abdomen" inputmode="decimal"></div>
-      <div class="field"><label>Coxa</label><input id="pw-coxa" inputmode="decimal"></div></div>
-      <div class="field"><label>Braço</label><input id="pw-braco" inputmode="decimal"></div>
-      <div class="field"><label>Foto de evolução (opcional)</label><input type="file" accept="image/*" id="pw-foto"></div>
+      <div class="field-2"><div class="field"><label for="pw-cintura">Cintura</label><input id="pw-cintura" inputmode="decimal"></div>
+      <div class="field"><label for="pw-quadril">Quadril</label><input id="pw-quadril" inputmode="decimal"></div></div>
+      <div class="field-2"><div class="field"><label for="pw-abdomen">Abdômen</label><input id="pw-abdomen" inputmode="decimal"></div>
+      <div class="field"><label for="pw-coxa">Coxa</label><input id="pw-coxa" inputmode="decimal"></div></div>
+      <div class="field"><label for="pw-braco">Braço</label><input id="pw-braco" inputmode="decimal"></div>
+      <div class="field"><label for="pw-foto">Foto de evolução (opcional)</label><input type="file" accept="image/*" id="pw-foto"></div>
       <button class="btn btn-primary btn-block" onclick="savePesagem()">Salvar pesagem</button>`;
   }
   if(id==='caneta'){
     return `<h2>Controle da caneta</h2><p class="sub">Acompanhe quantas aplicações ainda restam.</p>
-      <div class="field-2"><div class="field"><label>Capacidade (mg)</label><input id="pn-cap" inputmode="decimal" value="${S.pen.capacidadeMg||''}" placeholder="ex: 60"></div>
-      <div class="field"><label>Dose semanal (mg)</label><input id="pn-dose" inputmode="decimal" value="${S.pen.doseMg||''}" placeholder="ex: 7,5"></div></div>
-      <div class="field"><label>Aplicações já feitas com esta caneta</label><input id="pn-used" inputmode="numeric" value="${S.pen.usadas||0}"></div>
+      <div class="field-2"><div class="field"><label for="pn-cap">Capacidade (mg)</label><input id="pn-cap" inputmode="decimal" value="${S.pen.capacidadeMg||''}" placeholder="ex: 60"></div>
+      <div class="field"><label for="pn-dose">Dose semanal (mg)</label><input id="pn-dose" inputmode="decimal" value="${S.pen.doseMg||''}" placeholder="ex: 7,5"></div></div>
+      <div class="field"><label for="pn-used">Aplicações já feitas com esta caneta</label><input id="pn-used" inputmode="numeric" value="${S.pen.usadas||0}"></div>
       <button class="btn btn-primary btn-block" onclick="savePen()">Salvar caneta</button>`;
   }
   if(id==='exame'){
     const tipos=['Hemoglobina glicada','Colesterol total','Triglicerídeos','Vitamina D','Vitamina B12','Ferritina','TSH','Outro'];
     return `<h2>Adicionar exame</h2><p class="sub">Guarde o resultado para acompanhar a evolução.</p>
-      <div class="field"><label>Exame</label><select id="ex-tipo">${tipos.map(t=>`<option>${t}</option>`).join('')}</select></div>
-      <div class="field-2"><div class="field"><label>Data</label><input type="date" id="ex-date" value="${todayISO()}"></div>
-      <div class="field"><label>Resultado</label><input id="ex-val" placeholder="ex: 5,4%"></div></div>
+      <div class="field"><label for="ex-tipo">Exame</label><select id="ex-tipo">${tipos.map(t=>`<option>${t}</option>`).join('')}</select></div>
+      <div class="field-2"><div class="field"><label for="ex-date">Data</label><input type="date" id="ex-date" value="${todayISO()}"></div>
+      <div class="field"><label for="ex-val">Resultado</label><input id="ex-val" placeholder="ex: 5,4%"></div></div>
       <button class="btn btn-primary btn-block" onclick="saveExame()">Salvar exame</button>`;
   }
   if(id==='compromisso'){
     const tipos=['Consulta','Exame','Retorno','Renovar receita','Comprar caneta'];
     return `<h2>Novo compromisso</h2><p class="sub">Nunca perca um retorno ou uma receita vencendo.</p>
-      <div class="field"><label>Tipo</label><select id="cp-tipo">${tipos.map(t=>`<option>${t}</option>`).join('')}</select></div>
-      <div class="field"><label>Data</label><input type="date" id="cp-date" value="${todayISO()}"></div>
-      <div class="field"><label>Observação</label><input id="cp-obs" placeholder="opcional"></div>
+      <div class="field"><label for="cp-tipo">Tipo</label><select id="cp-tipo">${tipos.map(t=>`<option>${t}</option>`).join('')}</select></div>
+      <div class="field"><label for="cp-date">Data</label><input type="date" id="cp-date" value="${todayISO()}"></div>
+      <div class="field"><label for="cp-obs">Observação</label><input id="cp-obs" placeholder="opcional"></div>
       <button class="btn btn-primary btn-block" onclick="saveCompromisso()">Agendar</button>`;
   }
   if(id==='bio'){
     return `<h2>Nova bioimpedância</h2><p class="sub">Preencha os campos que sua balança ou exame informar. Todos são opcionais.</p>
-      <div class="field"><label>Data</label><input type="date" id="bi-date" value="${todayISO()}"></div>
-      <div class="field-2"><div class="field"><label>Gordura corporal (%)</label><input id="bi-gordura" inputmode="decimal" placeholder="ex: 35,1"></div>
-      <div class="field"><label>Massa magra (kg)</label><input id="bi-massaMagra" inputmode="decimal" placeholder="ex: 53,5"></div></div>
-      <div class="field-2"><div class="field"><label>Massa muscular (kg)</label><input id="bi-musculo" inputmode="decimal" placeholder="opcional"></div>
-      <div class="field"><label>Água corporal (%)</label><input id="bi-agua" inputmode="decimal" placeholder="opcional"></div></div>
-      <div class="field-2"><div class="field"><label>Gordura visceral</label><input id="bi-visceral" inputmode="decimal" placeholder="nível"></div>
-      <div class="field"><label>Metabolismo basal (kcal)</label><input id="bi-tmb" inputmode="numeric" placeholder="opcional"></div></div>
+      <div class="field"><label for="bi-date">Data</label><input type="date" id="bi-date" value="${todayISO()}"></div>
+      <div class="field-2"><div class="field"><label for="bi-gordura">Gordura corporal (%)</label><input id="bi-gordura" inputmode="decimal" placeholder="ex: 35,1"></div>
+      <div class="field"><label for="bi-massaMagra">Massa magra (kg)</label><input id="bi-massaMagra" inputmode="decimal" placeholder="ex: 53,5"></div></div>
+      <div class="field-2"><div class="field"><label for="bi-musculo">Massa muscular (kg)</label><input id="bi-musculo" inputmode="decimal" placeholder="opcional"></div>
+      <div class="field"><label for="bi-agua">Água corporal (%)</label><input id="bi-agua" inputmode="decimal" placeholder="opcional"></div></div>
+      <div class="field-2"><div class="field"><label for="bi-visceral">Gordura visceral</label><input id="bi-visceral" inputmode="decimal" placeholder="nível"></div>
+      <div class="field"><label for="bi-tmb">Metabolismo basal (kcal)</label><input id="bi-tmb" inputmode="numeric" placeholder="opcional"></div></div>
       <button class="btn btn-primary btn-block" onclick="saveBio()">Salvar bioimpedância</button>`;
   }
   if(id==='perfil') return configuracoesView();
@@ -971,6 +1037,15 @@ function cfgPreferenciasSecao(p,ic){
       <div class="glass-field"><label for="pf-prot">Meta de proteína (g)</label>
         <label class="field-wrap" for="pf-prot"><input id="pf-prot" inputmode="numeric" value="${p.metaProteina}"></label></div>
     </div>`;
+}
+const PLANO_LABEL={free:'Gratuito',monthly:'Premium Mensal',yearly:'Premium Anual'};
+function cfgAssinaturaSecao(){
+  const plano=LICENSE?LICENSE.getPlan():'free';
+  const dias=LICENSE?LICENSE.daysRemaining():null;
+  return `<button type="button" class="mais-item" onclick="go('premium')">
+      <span class="badge-glow">${icon('medal')}</span>
+      <span class="mais-item-text"><span class="mais-item-t">${PLANO_LABEL[plano]||'Gratuito'}</span><span class="mais-item-s">${plano==='free'?'Conheça os planos Premium':(dias!=null?`Renova em ${dias} dia${dias===1?'':'s'}`:'Gerenciar assinatura')}</span></span>
+    </button>`;
 }
 function cfgDadosSecao(){
   return `<button type="button" class="mais-item" onclick="doLogout()">
@@ -1042,7 +1117,9 @@ function configuracoesView(){
   return `<div class="grab"></div>
     <h2>Configurações</h2><p class="sub">Seu perfil, preferências e dados em um só lugar.</p>
 
-    ${cfgGroup('Perfil',cfgPerfilSecao(p,ic,meds,medIdx))}
+    ${cfgGroup('Assinatura',cfgAssinaturaSecao())}
+
+    ${cfgGroup('Perfil',cfgPerfilSecao(p,ic,meds,medIdx),'margin-top:14px')}
     ${cfgGroup('Preferências',cfgPreferenciasSecao(p,ic))}
 
     <button class="btn-pill block" onclick="savePerfil()">Salvar alterações</button>
@@ -1070,9 +1147,9 @@ function apCalendarHTML(){
   const today=todayISO();
   return `<div class="gcard tight ap-cal" id="ap-calwrap">
     <div class="between" style="margin-bottom:12px">
-      <button type="button" class="cal-nav" onclick="apCalNav(-1)">${CAL_CHEV_L}</button>
+      <button type="button" class="cal-nav" onclick="apCalNav(-1)" aria-label="Semana anterior">${CAL_CHEV_L}</button>
       <span class="cal-title">${label}</span>
-      <button type="button" class="cal-nav" onclick="apCalNav(1)">${CAL_CHEV_R}</button>
+      <button type="button" class="cal-nav" onclick="apCalNav(1)" aria-label="Próxima semana">${CAL_CHEV_R}</button>
     </div>
     <div class="ap-week">${days.map(iso=>{
       const d=parseISO(iso); const sel=iso===tmp.date, isToday=iso===today;
@@ -1119,7 +1196,7 @@ function savePesagem(){
     if(date===todayISO() && NOTIF) NOTIF.cancelPesagemHoje();
     save();closeSheet();toast('Pesagem salva');render();
   };
-  if(file){ downscale(file,700,dataUrl=>{rec.foto=dataUrl;finish();}); }
+  if(file){ toast('Processando foto…'); downscale(file,700,dataUrl=>{rec.foto=dataUrl;finish();}); }
   else finish();
 }
 function savePen(){
@@ -1156,7 +1233,7 @@ function savePerfil(){
 }
 function resetAll(){
   if(confirm('Apagar todos os dados e recomeçar? Esta ação não pode ser desfeita.')){
-    S=null;store.set(KEY,'');go('inicio');render();
+    S=null;store.set(KEY,'');go('inicio');
   }
 }
 
@@ -1168,7 +1245,6 @@ function toggleSint(s){const L=todayLog();
     L.sintomas.includes(s)?L.sintomas=L.sintomas.filter(x=>x!==s):L.sintomas.push(s);}
   save();render();}
 function addWater(d){const L=todayLog();L.agua=Math.max(0,+((L.agua||0)+d).toFixed(2));save();render();}
-function addProt(g){const L=todayLog();L.prot.outros=Math.max(0,(L.prot.outros||0)+g);computeProtein(L);save();render();}
 function toggleEx(e){const L=todayLog();L.exercicios.includes(e)?L.exercicios=L.exercicios.filter(x=>x!==e):L.exercicios.push(e);save();render();}
 function setApet(a){todayLog().apetite=a;save();render();}
 function setFome(f){todayLog().fomeEmocional=f;save();render();}
@@ -1191,7 +1267,6 @@ function downscale(file,max,cb){
 }
 
 /* ---------- bind ---------- */
-function bindScreen(){}
 function bindSheet(id){
   if(id==='aplicar'){
     document.querySelectorAll('#bd .bmzone2').forEach(z=>z.addEventListener('click',()=>{
@@ -1278,7 +1353,6 @@ function obView(){
     <p class="muted center" style="font-size:11.5px;margin-top:10px;line-height:1.5">O Compasso ajuda você a acompanhar seu tratamento, mas não substitui a orientação do seu médico ou nutricionista.</p>
   </div>`;
 }
-function bindOb(){}
 
 /* ---------- combobox / date picker customizados (dropdown do navegador substituído) ---------- */
 function closeAllPopovers(){
@@ -1351,9 +1425,9 @@ function renderCalendar(id){
   }
   document.getElementById('cdatepanel-'+id).innerHTML=`
     <div class="cal-hdr">
-      <button type="button" class="cal-nav" onclick="calNav('${id}',-1)">${CAL_CHEV_L}</button>
+      <button type="button" class="cal-nav" onclick="calNav('${id}',-1)" aria-label="Mês anterior">${CAL_CHEV_L}</button>
       <span class="cal-title">${MESES_LONGOS[st.month]} ${st.year}</span>
-      <button type="button" class="cal-nav" onclick="calNav('${id}',1)">${CAL_CHEV_R}</button>
+      <button type="button" class="cal-nav" onclick="calNav('${id}',1)" aria-label="Próximo mês">${CAL_CHEV_R}</button>
     </div>
     <div class="cal-week">${['D','S','T','Q','Q','S','S'].map(w=>`<span>${w}</span>`).join('')}</div>
     <div class="cal-grid">${cells}</div>`;
@@ -1589,7 +1663,6 @@ function icon(name,white,flip){
     pulse:'<path d="M3 12h4l2-6 4 12 2-6h6"/>',
     steth:'<path d="M6 3v6a4 4 0 0 0 8 0V3"/><path d="M10 16a5 5 0 0 0 5 5 4 4 0 0 0 4-4v-2"/><circle cx="19" cy="11" r="2"/>',
     doc:'<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/><path d="M10 13h6M10 17h6"/>',
-    eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     down:'<path d="M12 4v11"/><path d="M7 11l5 5 5-5"/><path d="M5 20h14"/>',
     scale2:'<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9l3-3 3 3"/>',
     bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
@@ -1639,7 +1712,7 @@ function eggControl(L){
   return `<div class="eggrow">${dots}</div>
     <div class="protresult"><b>${q} ${q===1?'ovo':'ovos'}</b> ≈ ${q*6} g de proteína</div>
     <div class="row" style="gap:8px;margin-top:10px">
-      <button class="btn btn-outline btn-sm" style="flex:0 0 64px" onclick="addProtQty('ovo',-1)">−</button>
+      <button class="btn btn-outline btn-sm" style="flex:0 0 64px" onclick="addProtQty('ovo',-1)" aria-label="Remover um ovo">−</button>
       <button class="btn btn-ghost btn-sm" style="flex:1" onclick="addProtQty('ovo',1)">+ 1 ovo</button></div>`;
 }
 function gramControl(s,L){
@@ -1758,7 +1831,7 @@ function bioView(){
    ============================================================ */
 
 /* ----- estado do relatório ----- */
-let RPeriodo='30d', RDataIni='', RDataFim='', RGerado=false;
+let RPeriodo='30d', RDataIni='', RDataFim='';
 
 /* Estatísticas de resumo exibidas na pré-visualização da tela de Relatórios.
    Reaproveita 100% dos dados já coletados por coletaDados() — nenhuma fonte
@@ -1798,7 +1871,7 @@ function relatorioView(){
   ];
   return `
   <div class="ap-head">
-    <button type="button" class="ap-back" onclick="go('mais')">${CAL_CHEV_L}</button>
+    <button type="button" class="ap-back" onclick="go('mais')" aria-label="Voltar">${CAL_CHEV_L}</button>
     <span class="ap-title">Relatórios</span>
     <span class="ap-head-spacer"></span>
   </div>
@@ -1934,23 +2007,6 @@ function buildActionPlanContext(){
   };
 }
 
-/* Contexto para js/goals.js — não recalcula nada: reaproveita coletaDados(),
-   achievements(), goalProgressPct() e daysTreat() (todos já existentes), mais
-   INSIGHTS.gerar() só pra checar presença de regra (sinal de estagnação) ou
-   ler `assinatura` já pronta (ex. adesao_semanal). */
-function buildGoalsContext(){
-  return {
-    profile: S.profile,
-    d: coletaDados(S.profile.dataInicio, todayISO()),
-    weighings: S.weighings, applications: S.applications, exams: S.exams, bio: S.bio||[],
-    achievements: achievements(),
-    insights: INSIGHTS ? INSIGHTS.gerar(buildInsightContext(S.profile.dataInicio, todayISO()), {registrarHistorico:false}) : [],
-    notifPrefs: NOTIF ? NOTIF.loadPrefs() : null,
-    pesoProgressoPct: goalProgressPct(),
-    diasTreat: daysTreat(),
-  };
-}
-
 /* -------- resumo automático -------- */
 function gerarResumo(d,ini,fim){
   const frases=[];
@@ -1987,22 +2043,6 @@ function gerarResumo(d,ini,fim){
    GERADOR PDF CANVAS · A4 retrato, unidades em pontos (pt)
    Canvas nativo, sem bibliotecas externas.
    ============================================================ */
-function gerarRelatorio(){
-  const{ini,fim}=periodoRange();
-  if(ini>fim){toast('A data inicial deve ser anterior à final');return;}
-  toast('Gerando relatório…');
-  setTimeout(()=>{
-    try{
-      const d=coletaDados(ini,fim);
-      const html=buildPDF(d,ini,fim);
-      mostrarPreview(html,ini,fim);
-    }catch(e){
-      console.error(e);
-      toast('Erro ao gerar relatório. Tente novamente.');
-    }
-  },80);
-}
-
 /* ============================================================
    buildPDF + mostrarPreview · HTML com @media print A4
    Abre numa nova aba; window.print() gera PDF A4 perfeito.
@@ -2405,27 +2445,6 @@ ${(()=>{
   </div>`;
 })()}
 
-<!-- EVOLUÇÃO DAS METAS (opcional — em andamento, concluídas recentes e estagnadas) -->
-${(()=>{
-  if(!GOALS) return '';
-  const ach=achievements();
-  const concluidaRecente=(m)=>{
-    if(m.status!=='concluida') return false;
-    if(m.categoria!=='marco') return true; // ex.: peso-alvo — estado sempre atual, sem data de conquista pra checar
-    const a=ach.find(x=>x.t===m.titulo.replace('Marco: ',''));
-    return !!(a && a.date && daysBetween(a.date, todayISO())<=21);
-  };
-  const metas = GOALS.gerar(buildGoalsContext()).filter(m=>m.status==='em_andamento'||m.status==='estagnada'||concluidaRecente(m));
-  if(!metas.length) return '';
-  return `<div class="section">
-    <div class="section-head"><span class="dot"></span><span class="section-title">Evolução das metas</span></div>
-    ${metas.map(m=>`<div class="insight" style="margin-bottom:10px">
-      <div class="insight-t">${esc(m.titulo)} — ${m.percentual}%</div>
-      <p>${esc(m.proximaEtapa)} <span style="color:var(--gray)">${META_STATUS_LABEL[m.status]}</span></p>
-    </div>`).join('')}
-  </div>`;
-})()}
-
 <!-- RESUMO AUTOMÁTICO -->
 <div class="insight">
   <div class="insight-t">Resumo automático</div>
@@ -2454,6 +2473,7 @@ function mostrarPreview(html,ini,fim){
 }
 
 function gerarRelatorio(){
+  if(FEATURES && LICENSE && !LICENSE.can(FEATURES.REPORTS)){ go('premium'); return; }
   const{ini,fim}=periodoRange();
   if(ini>fim){toast('A data inicial deve ser anterior à final');return;}
   toast('Gerando relatório…');
@@ -2463,7 +2483,7 @@ function gerarRelatorio(){
       mostrarPreview(buildPDF(d,ini,fim),ini,fim);
     }catch(e){
       console.error(e);
-      toast('Erro ao gerar. Abra o app no navegador para usar esta função.');
+      toast('Não foi possível gerar o relatório agora. Tente novamente em instantes.');
     }
   },80);
 }
@@ -2530,7 +2550,7 @@ let AUTH_MSG=null; // mensagem de sucesso exibida no lugar do formulário (ex.: 
 function emailValido(e){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); }
 function goAuth(screen){ AUTH_MSG=null; AUTH_SCREEN=screen; renderWelcome(); }
 function authBackBtn(){
-  return `<div class="row" style="margin-bottom:14px"><button type="button" class="cal-nav" onclick="goAuth('welcome')">${CAL_CHEV_L}</button></div>`;
+  return `<div class="row" style="margin-bottom:14px"><button type="button" class="cal-nav" onclick="goAuth('welcome')" aria-label="Voltar">${CAL_CHEV_L}</button></div>`;
 }
 function authMsgPanel(titulo,texto,voltarLabel,voltarScreen){
   return `<div class="ob">
@@ -2738,6 +2758,7 @@ async function initNotifications(){
     notifListenerBound = true;
     document.addEventListener('visibilitychange', ()=>{
       if(document.visibilityState==='visible' && S) NOTIF.checkAndNotify(buildNotifStatus());
+      if(document.visibilityState==='visible' && LICENSE) LICENSE.refresh();
     });
   }
 }
@@ -2771,14 +2792,23 @@ async function initActionplan(){
     console.error('[ActionPlan] erro ao inicializar:', e);
   }
 }
-async function initGoals(){
+/* Único ponto que informa js/database.js se o backup está autorizado —
+   database.js não sabe o que é LICENSE/FEATURES, só recebe um booleano.
+   Chamado sempre que o estado da licença pode ter mudado. */
+function atualizarPermissaoDeSync(){
+  if(!DB) return;
+  DB.setSyncAllowed(!FEATURES || !LICENSE || LICENSE.can(FEATURES.BACKUP));
+}
+async function initLicense(){
   try{
-    GOALS = await Promise.race([
-      window.__goalsReady,
+    LICENSE = await Promise.race([
+      window.__licenseReady,
       new Promise(resolve=>setTimeout(()=>resolve(null), 4000)),
     ]);
+    if(LICENSE){ FEATURES = LICENSE.FEATURES; await LICENSE.refresh(); } // revalida oportunisticamente, mesmo padrão do sync (Sprint J)
+    atualizarPermissaoDeSync();
   }catch(e){
-    console.error('[Goals] erro ao inicializar:', e);
+    console.error('[License] erro ao inicializar:', e);
   }
 }
 async function registrarListenerAuth(){
@@ -2806,7 +2836,7 @@ async function boot(){
   await initInsights();
   await initTimeline();
   await initActionplan();
-  await initGoals();
+  await initLicense();
   await registrarListenerAuth();
   if(AUTH_SCREEN==='nova-senha'){ renderWelcome(); return; }
   const temSessao = await verificarSessao();

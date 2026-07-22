@@ -18,8 +18,7 @@ try {
 /* Verifica apenas se o cliente foi inicializado corretamente — não faz nenhuma chamada de rede. */
 export function testarConexaoSupabase() {
   const ok = !!(supabase && supabase.auth && supabase.from);
-  if (ok) console.log('[Supabase] cliente inicializado com sucesso.');
-  else console.error('[Supabase] cliente não foi inicializado corretamente.');
+  if (!ok) console.error('[Supabase] cliente não foi inicializado corretamente.');
   return ok;
 }
 
