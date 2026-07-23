@@ -139,7 +139,7 @@ function seedExample(){
     pen:{capacidadeMg:60,doseMg:7.5,usadas:5},created:startISO};
 }
 function blankState(p){
-  return {profile:p,weighings:[{date:p.dataInicio,peso:p.pesoInicial}],applications:[],dailyLogs:{},
+  return {profile:p,weighings:[{id:crypto.randomUUID(),date:p.dataInicio,peso:p.pesoInicial}],applications:[],dailyLogs:{},
     exams:[],agenda:[],bio:[],pen:{capacidadeMg:0,doseMg:0,usadas:0},created:p.dataInicio};
 }
 
@@ -179,6 +179,8 @@ function render(){
   else if(TAB==='proteina') html=proteinaView();
   else if(TAB==='premium') html=premiumView();
   scr.innerHTML=html;
+  const topbar=document.querySelector('.top');
+  if(topbar) document.documentElement.style.setProperty('--topbar-h',topbar.offsetHeight+'px');
 }
 
 /* ---------- Topbar ---------- */
@@ -958,6 +960,7 @@ function sheetBody(id){
     return `<h2>Nova pesagem</h2><p class="sub">Peso, medidas e uma foto (opcional).</p>
       <div class="glass-field-2"><div class="glass-field"><label for="pw-date">Data</label><label class="field-wrap" for="pw-date"><input type="date" id="pw-date" value="${todayISO()}"></label></div>
       <div class="glass-field"><label for="pw-peso">Peso (kg)</label><label class="field-wrap" for="pw-peso"><input id="pw-peso" inputmode="decimal" placeholder="${nf(currentWeight())}"></label></div></div>
+      <div id="pw-hint" style="font-size:12px;color:var(--warn2);margin:-10px 0 14px;display:none"></div>
       <div class="eyebrow2" style="margin:6px 0 8px">Medidas (cm) · opcional</div>
       <div class="glass-field-2"><div class="glass-field"><label for="pw-cintura">Cintura</label><label class="field-wrap" for="pw-cintura"><input id="pw-cintura" inputmode="decimal"></label></div>
       <div class="glass-field"><label for="pw-quadril">Quadril</label><label class="field-wrap" for="pw-quadril"><input id="pw-quadril" inputmode="decimal"></label></div></div>
@@ -1205,7 +1208,7 @@ function savePesagem(){
   const date=val('pw-date'), peso=numBR(val('pw-peso'));
   if(!date||!peso){toast('Informe data e peso');return;}
   const prev=S.weighings.find(w=>w.date===date);
-  const rec={id:prev?prev.id:crypto.randomUUID(),date,peso};
+  const rec={id:(prev&&prev.id)||crypto.randomUUID(),date,peso};
   ['cintura','quadril','abdomen','coxa','braco'].forEach(k=>{const v=numBR(val('pw-'+k));if(v)rec[k]=v;});
   const file=document.getElementById('pw-foto').files[0];
   const finish=()=>{ // substitui pesagem do mesmo dia se existir
@@ -1238,7 +1241,7 @@ function saveBio(){
   if(!S.bio)S.bio=[];
   const date=val('bi-date');
   const prev=S.bio.find(b=>b.date===date);
-  const rec={id:prev?prev.id:crypto.randomUUID(),date};
+  const rec={id:(prev&&prev.id)||crypto.randomUUID(),date};
   ['gordura','massaMagraPct','musculo','agua','visceral','tmb'].forEach(k=>{const v=numBR(val('bi-'+k));if(v!=null)rec[k]=v;});
   if(Object.keys(rec).length<3){toast('Preencha ao menos um valor');return;}
   S.bio=S.bio.filter(b=>b.date!==date); S.bio.push(rec);
@@ -1289,7 +1292,27 @@ function downscale(file,max,cb){
 }
 
 /* ---------- bind ---------- */
+function updatePesagemHint(){
+  const date=val('pw-date');
+  const hint=document.getElementById('pw-hint');
+  const btn=document.getElementById('pw-save-btn');
+  if(!hint||!btn)return;
+  const existe=date&&S.weighings.some(w=>w.date===date);
+  if(existe){
+    hint.textContent='Já existe uma pesagem nesse dia — salvar vai atualizar o peso registrado, não criar um novo registro.';
+    hint.style.display='block';
+    btn.textContent='Atualizar pesagem';
+  }else{
+    hint.style.display='none';
+    btn.textContent='Salvar pesagem';
+  }
+}
 function bindSheet(id){
+  if(id==='pesar'){
+    updatePesagemHint();
+    const dateInput=document.getElementById('pw-date');
+    if(dateInput) dateInput.addEventListener('change',updatePesagemHint);
+  }
   if(id==='aplicar'){
     document.querySelectorAll('#bd .bmzone2').forEach(z=>z.addEventListener('click',()=>{
       tmp.local=z.dataset.local;

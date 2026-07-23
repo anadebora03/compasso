@@ -19,6 +19,8 @@
     --nv-glass:rgba(125,168,255,.07); --nv-glass-strong:rgba(125,168,255,.14);
     --nv-glass-top:rgba(130,175,255,.09); --nv-glass-bottom:rgba(130,175,255,.026);
     --nv-border:rgba(140,180,255,.16); --nv-border-strong:rgba(140,180,255,.3);
+    --nav-glass:rgba(11,21,38,.82);
+    --topbar-h:62px;
 
     --glass-card-1:rgba(130,175,255,.075); --glass-card-2:rgba(130,175,255,.022); --glass-card-border:rgba(140,180,255,.15);
     --glass-hero-1:rgba(130,175,255,.09); --glass-hero-2:rgba(130,175,255,.022); --glass-hero-3:rgba(130,175,255,.04);
@@ -63,6 +65,7 @@
     --nv-glass:rgba(46,111,201,.05); --nv-glass-strong:rgba(46,111,201,.09);
     --nv-glass-top:rgba(46,111,201,.05); --nv-glass-bottom:rgba(46,111,201,.015);
     --nv-border:rgba(46,111,201,.14); --nv-border-strong:rgba(46,111,201,.28);
+    --nav-glass:rgba(244,247,252,.82);
 
     --glass-card-1:rgba(46,111,201,.05); --glass-card-2:rgba(46,111,201,.015); --glass-card-border:rgba(46,111,201,.14);
     --glass-hero-1:rgba(46,111,201,.06); --glass-hero-2:rgba(46,111,201,.015); --glass-hero-3:rgba(46,111,201,.03);
@@ -265,7 +268,7 @@
 
   /* Bottom nav (Quiet Premium) */
   .nav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:440px;z-index:30;
-       background:rgba(11,21,38,.82);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
+       background:var(--nav-glass);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
        border-top:1px solid var(--nv-border);
        display:flex;padding:8px 6px calc(8px + env(safe-area-inset-bottom))}
   .nav button{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 2px;color:var(--tx-3);font-size:10px;font-weight:500;letter-spacing:-.005em}
@@ -360,8 +363,9 @@
   .pdf-close{background:#2a2a2a;color:#aaa}
   .mt8{margin-top:8px}.mt14{margin-top:14px}.mb0{margin-bottom:0}
   .pill{font-size:11px;font-weight:800;padding:4px 9px;border-radius:999px;background:var(--amber-soft);color:#946412}
-  .toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;
-         padding:12px 18px;border-radius:14px;font-size:13px;font-weight:700;z-index:60;box-shadow:var(--shadow-lg);animation:up .25s}
+  .toast{position:fixed;bottom:96px;left:50%;transform:translateX(-50%);background:var(--nv-elevated);color:var(--tx-1);
+         border:1px solid var(--nv-border-strong);
+         padding:12px 18px;border-radius:14px;font-size:13px;font-weight:700;z-index:60;box-shadow:var(--sh-card2);animation:up .25s}
   a.linkish{color:var(--green);font-weight:700;text-decoration:none}
 
   /* ============================================================
@@ -553,8 +557,11 @@
     position:sticky;top:0;z-index:2;background:var(--nv-bg-2);padding:14px 0 16px;margin:0 -24px;padding-left:24px;padding-right:24px}
   /* Variante para quando o .ap-head é o cabeçalho de uma TELA (dentro de .screen,
      padding 18px), não de um sheet (.sheet-glass, padding 24px) — sem isso a margem
-     negativa de -24px descola do padding real e estoura a largura da viewport. */
-  .ap-head.ap-head-screen{margin:0 -18px;padding-left:18px;padding-right:18px}
+     negativa de -24px descola do padding real e estoura a largura da viewport.
+     O "top" também precisa ficar abaixo da topbar do app (.top, também sticky
+     top:0) — sem isso as duas barras disputam o mesmo topo e uma cobre a outra
+     ao rolar. --topbar-h é medida e atualizada em JS a cada render(). */
+  .ap-head.ap-head-screen{margin:0 -18px;padding-left:18px;padding-right:18px;top:var(--topbar-h)}
   .ap-back{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;
     color:var(--tx-2);transition:background var(--dur-fast) var(--ease-out)}
   .ap-back:active{background:var(--nv-glass-strong)}
