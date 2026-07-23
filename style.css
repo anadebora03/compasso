@@ -20,7 +20,6 @@
     --nv-glass-top:rgba(130,175,255,.09); --nv-glass-bottom:rgba(130,175,255,.026);
     --nv-border:rgba(140,180,255,.16); --nv-border-strong:rgba(140,180,255,.3);
     --nav-glass:rgba(11,21,38,.82);
-    --topbar-h:62px;
 
     --glass-card-1:rgba(130,175,255,.075); --glass-card-2:rgba(130,175,255,.022); --glass-card-border:rgba(140,180,255,.15);
     --glass-hero-1:rgba(130,175,255,.09); --glass-hero-2:rgba(130,175,255,.022); --glass-hero-3:rgba(130,175,255,.04);
@@ -558,10 +557,12 @@
   /* Variante para quando o .ap-head é o cabeçalho de uma TELA (dentro de .screen,
      padding 18px), não de um sheet (.sheet-glass, padding 24px) — sem isso a margem
      negativa de -24px descola do padding real e estoura a largura da viewport.
-     O "top" também precisa ficar abaixo da topbar do app (.top, também sticky
-     top:0) — sem isso as duas barras disputam o mesmo topo e uma cobre a outra
-     ao rolar. --topbar-h é medida e atualizada em JS a cada render(). */
-  .ap-head.ap-head-screen{margin:0 -18px;padding-left:18px;padding-right:18px;top:var(--topbar-h)}
+     Fica position:static (não sticky) de propósito: a topbar do app (.top) já é
+     sticky nessas telas, e duas barras fixas competindo pelo topo da viewport só
+     gerou confusão (sobreposição, texto cortado ao rolar). A tela já tem
+     navegação sempre acessível pela barra inferior — não precisa de um segundo
+     cabeçalho grudado no topo. */
+  .ap-head.ap-head-screen{position:static;margin:0 -18px;padding-left:18px;padding-right:18px}
   .ap-back{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;
     color:var(--tx-2);transition:background var(--dur-fast) var(--ease-out)}
   .ap-back:active{background:var(--nv-glass-strong)}

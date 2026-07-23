@@ -179,8 +179,6 @@ function render(){
   else if(TAB==='proteina') html=proteinaView();
   else if(TAB==='premium') html=premiumView();
   scr.innerHTML=html;
-  const topbar=document.querySelector('.top');
-  if(topbar) document.documentElement.style.setProperty('--topbar-h',topbar.offsetHeight+'px');
 }
 
 /* ---------- Topbar ---------- */

@@ -7,7 +7,7 @@
 // Bump a cada release que altera qualquer arquivo do APP_SHELL abaixo — é o
 // único jeito de o cache stale-while-revalidate parar de servir a versão
 // antiga no primeiro carregamento após o deploy (ver RC2: "Minha Jornada").
-const CACHE_VERSION = 'build-20260724b';
+const CACHE_VERSION = 'build-20260724c';
 const CACHE_NAME = `compasso-cache-${CACHE_VERSION}`;
 
 const APP_SHELL = [
