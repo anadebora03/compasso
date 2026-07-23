@@ -1,5 +1,6 @@
 {
   "id": "/",
+  "version": "1.0.0",
   "name": "Compasso",
   "short_name": "Compasso",
   "description": "Compasso · companheiro de tratamento com análogos de GLP-1. Aplicações, peso, medidas, sintomas e evolução em um diário digital.",

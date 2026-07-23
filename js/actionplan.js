@@ -42,7 +42,7 @@ const MAPA_INSIGHT_ACAO = {
   peso_meta_parcial(ins){
     if(ins.tipo!=='parabens') return null; // só quando a meta foi 100% atingida
     return {prioridade:'baixa', categoria:'peso', titulo:'Meta de peso atingida',
-      descricao:'Reforço positivo — nenhuma ação necessária.'};
+      descricao:'Reforço positivo — nenhuma ação necessária.', acionavel:false};
   },
   adesao_semanal(ins){
     if(ins.tipo!=='atencao') return null; // só adesão baixa (<70%)
@@ -71,27 +71,27 @@ const MAPA_INSIGHT_ACAO = {
   },
   sintoma_reduzindo(ins){
     return {prioridade:'baixa', categoria:'sintomas', titulo:'Sintomas melhorando',
-      descricao:'Reforço positivo — nenhuma ação necessária.'};
+      descricao:'Reforço positivo — nenhuma ação necessária.', acionavel:false};
   },
   bio_gordura(ins){
     return {prioridade:'baixa', categoria:'bioimpedancia', titulo:'Evolução positiva de composição corporal',
-      descricao:'Reforço positivo — nenhuma ação necessária.'};
+      descricao:'Reforço positivo — nenhuma ação necessária.', acionavel:false};
   },
   bio_massa_magra(ins){
     if(ins.tipo==='atencao') return {prioridade:'media', categoria:'bioimpedancia', titulo:'Perda de massa magra',
       descricao:'Rever proteína e treino de força com a equipe de acompanhamento.'};
     return {prioridade:'baixa', categoria:'bioimpedancia', titulo:'Evolução positiva de composição corporal',
-      descricao:'Reforço positivo — nenhuma ação necessária.'};
+      descricao:'Reforço positivo — nenhuma ação necessária.', acionavel:false};
   },
   medidas_cintura_peso(ins){
     return {prioridade:'baixa', categoria:'peso', titulo:'Evolução positiva de composição corporal',
-      descricao:'Reforço positivo — nenhuma ação necessária.'};
+      descricao:'Reforço positivo — nenhuma ação necessária.', acionavel:false};
   },
   exame_variacao(ins){
     if(ins.tipo==='atencao') return {prioridade:'alta', categoria:'exames', titulo:'Exame relevante piorou',
       descricao:'Levar o resultado para a próxima consulta médica.'};
     if(ins.tipo==='parabens') return {prioridade:'baixa', categoria:'exames', titulo:'Exame melhorou',
-      descricao:'Reforço positivo — nenhuma ação necessária.'};
+      descricao:'Reforço positivo — nenhuma ação necessária.', acionavel:false};
     return null; // informativo: exame fora da lista onde "menor é melhor" é seguro afirmar — não julga
   },
   // aplicacao_tempo_uso, aplicacao_dose_mudou e conquista_* não têm mapeador:
@@ -150,7 +150,7 @@ function gerar(ctx){
       if(!cfg) return;
       brutas.push({
         id:'insight:'+ins.id, prioridade:cfg.prioridade, categoria:cfg.categoria,
-        titulo:cfg.titulo, descricao:cfg.descricao,
+        titulo:cfg.titulo, descricao:cfg.descricao, acionavel:cfg.acionavel!==false,
         motivo: ins.justificativa || '',
         origem:'insight:'+ins.id, assinatura:String(ins.assinatura),
       });

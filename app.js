@@ -1,5 +1,6 @@
 /* ============================================================
    COMPASSO · Companheiro de tratamento GLP-1 (protótipo NutriEase)
+   v1.0.0 — Release Candidate
    Arquivo único, sem dependências externas.
    Persistência: localStorage com fallback em memória.
    Insights: motor local baseado em regras (descritivo, nunca
@@ -54,6 +55,7 @@ function daysBetween(a,b){return Math.round((parseISO(b)-parseISO(a))/864e5);}
 function daysAgo(iso){return Math.round((new Date().setHours(0,0,0,0)-parseISO(iso))/864e5);}
 function nf(n,d=1){return Number(n).toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});}
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function plural(n,singular,pluralForm){return n===1?singular:(pluralForm||singular+'s');}
 
 function toast(msg){
   const t=document.createElement('div');t.className='toast';t.textContent=msg;document.body.appendChild(t);
@@ -129,9 +131,9 @@ function seedExample(){
   const agenda=[{date:todayISO(new Date(Date.now()+9*864e5)),tipo:'Consulta',obs:'Retorno nutricional'}];
   const bd=off=>{const d=new Date(start);d.setDate(start.getDate()+off);return todayISO(d);};
   const bio=[
-    {date:bd(0),  gordura:42.0, massaMagra:55.7, musculo:52.9, agua:44.5, visceral:12, tmb:1520},
-    {date:bd(56), gordura:38.4, massaMagra:54.0, musculo:51.3, agua:47.0, visceral:10, tmb:1478},
-    {date:bd(112),gordura:35.1, massaMagra:53.5, musculo:50.8, agua:48.9, visceral:9,  tmb:1451},
+    {date:bd(0),  gordura:42.0, massaMagraPct:58.0, musculo:52.9, agua:44.5, visceral:12, tmb:1520},
+    {date:bd(56), gordura:38.4, massaMagraPct:61.6, musculo:51.3, agua:47.0, visceral:10, tmb:1478},
+    {date:bd(112),gordura:35.1, massaMagraPct:64.9, musculo:50.8, agua:48.9, visceral:9,  tmb:1451},
   ];
   return {profile,weighings,applications,dailyLogs,exams,agenda,bio,
     pen:{capacidadeMg:60,doseMg:7.5,usadas:5},created:startISO};
@@ -145,17 +147,27 @@ function blankState(p){
    ROUTER / RENDER
    ============================================================ */
 let TAB='inicio', SUB=null;
-function go(tab,sub=null){TAB=tab;SUB=sub;render();window.scrollTo(0,0);}
+function go(tab,sub=null){closeSheet();TAB=tab;SUB=sub;render();window.scrollTo(0,0);}
+
+/* ---------- Tema claro/escuro ---------- */
+let THEME=(store.get('compasso_theme_v1')||'dark');
+document.documentElement.setAttribute('data-theme',THEME);
+function toggleTheme(){
+  THEME=THEME==='dark'?'light':'dark';
+  store.set('compasso_theme_v1',THEME);
+  document.documentElement.setAttribute('data-theme',THEME);
+  render();
+}
 
 /* Telas já migradas pra identidade Quiet Premium (navy). As demais usam
    .screen.legacy pra manter o visual claro original até sua própria Sprint. */
-const QP_TABS=['inicio','aplicacao','evolucao'];
+const QP_TABS=['inicio','aplicacao','evolucao','diario','proteina'];
 let EV_TAB='peso';
 function evSetTab(t){EV_TAB=t;render();}
 function render(){
   const app=document.getElementById('app');
   if(!S){ app.innerHTML=obView(); return; }
-  const premiumScreen=QP_TABS.includes(TAB)||(TAB==='mais'&&(SUB===null||SUB==='relatorio'))||TAB==='premium';
+  const premiumScreen=QP_TABS.includes(TAB)||(TAB==='mais'&&(SUB===null||['relatorio','insights','planoacao','timeline','conquistas','stats','calc','exames','agenda','bio','jornada'].includes(SUB)))||TAB==='premium';
   app.innerHTML = topView() + `<div class="screen ${premiumScreen?'':'legacy'}" id="scr"></div>` + navView();
   const scr=document.getElementById('scr');
   let html='';
@@ -178,7 +190,7 @@ function topView(){
       ${logoSVG(22,'#fff','var(--accent-light)')}
       <div><h1>Compasso</h1><div class="greet">${greeting()}, ${esc(S.profile.nome)}</div></div>
     </div>
-    <button class="badge-ico" onclick="openSheet('perfil')" aria-label="Configurações">${icon('bell')}</button>
+    <button class="badge-ico" onclick="toggleTheme()" aria-label="Alternar tema">${icon(THEME==='dark'?'sun':'moon')}</button>
   </div>`;
 }
 
@@ -245,7 +257,7 @@ function inicioView(){
     ${pen.rest<=1?'<span class="pill" style="background:var(--warn2-soft);color:var(--warn2)">Acabando</span>':''}</div>
     <div class="pen2 ${pen.rest<=1?'low':''}"><span style="width:${Math.max(6,pen.frac*100)}%"></span></div>
     <div class="between"><span class="muted" style="font-size:13px;color:var(--tx-2)">Restam <b style="color:var(--tx-1)">${pen.rest}</b> de ${pen.total} aplicações</span>
-    <button class="btn-pill btn-sm ghost" onclick="openSheet('caneta')">Gerir</button></div>
+    <button class="btn-pill btn-sm ghost" onclick="openSheet('caneta')">Editar</button></div>
     ${pen.rest<=1?'<div style="font-size:12px;margin-top:8px;color:var(--tx-3)">🔔 Sua caneta acaba na próxima aplicação. Vale comprar a próxima.</div>':''}
   </div>`:''}
 
@@ -301,7 +313,7 @@ function aplicacaoView(){
     <div class="row" style="margin-top:14px;gap:14px">
       <div class="badge-glow" style="width:48px;height:48px;flex:0 0 48px">${icon('syringe')}</div>
       <div><div style="font-weight:700;font-size:16px;color:var(--tx-1)">${esc(S.profile.medicamento)} · ${esc(S.profile.doseAtual)} ${esc(S.profile.unidade)}</div>
-      <div style="font-size:13px;color:var(--tx-3);margin-top:2px">${na.days===0?'Dia de aplicar':'Em '+na.days+' dia(s) · '+fmtBRy(na.date)}</div></div>
+      <div style="font-size:13px;color:var(--tx-3);margin-top:2px">${na.days===0?'Dia de aplicar':'Em '+na.days+' '+plural(na.days,'dia','dias')+' · '+fmtBRy(na.date)}</div></div>
     </div>
     <button class="btn-pill block" style="margin-top:16px" onclick="openSheet('aplicar')">${icon('plus',true)} Registrar aplicação</button>
   </div>
@@ -376,9 +388,9 @@ function evPesoTab(w){
   return `
   <div class="gcard tight">${lineChartPremium(w.map(x=>({x:x.date,y:x.peso})),S.profile.pesoMeta)}</div>
   <div class="grid3">
-    <div class="stat-tile2"><div class="k">Peso atual</div><div class="v" style="font-size:19px">${nf(currentWeight())}<small> kg</small></div></div>
-    <div class="stat-tile2"><div class="k">Perda total</div><div class="v" style="font-size:19px">${l>=0?'−':'+'}${nf(Math.abs(l))}<small> kg</small></div></div>
-    <div class="stat-tile2"><div class="k">% Perda</div><div class="v" style="font-size:19px">${nf(Math.abs(lp))}<small>%</small></div></div>
+    <div class="stat-tile2"><div class="k">Peso atual</div><div class="v" style="font-size:20px">${nf(currentWeight())}<small> kg</small></div></div>
+    <div class="stat-tile2"><div class="k">Perda total</div><div class="v" style="font-size:20px">${l>=0?'−':'+'}${nf(Math.abs(l))}<small> kg</small></div></div>
+    <div class="stat-tile2"><div class="k">% Perda</div><div class="v" style="font-size:20px">${nf(Math.abs(lp))}<small>%</small></div></div>
   </div>
   ${evEvolutionCard()}`;
 }
@@ -387,7 +399,7 @@ function evImcTab(){
   return `
   <div class="gcard tight">${lineChartPremium(imcSeries(),null,'')}</div>
   <div class="grid2">
-    <div class="stat-tile2"><div class="k">IMC atual</div><div class="v" style="font-size:19px">${cur?nf(cur):'—'}</div></div>
+    <div class="stat-tile2"><div class="k">IMC atual</div><div class="v" style="font-size:20px">${cur?nf(cur):'—'}</div></div>
     <div class="stat-tile2"><div class="k">Classificação</div><div class="v" style="font-size:15px">${imcClass(cur)||'—'}</div></div>
   </div>`;
 }
@@ -466,51 +478,51 @@ function diarioView(){
   <div class="scr-title">Diário de hoje</div>
   <div class="scr-sub">${WD[new Date().getDay()]}, ${fmtBRy(todayISO())} · leva menos de um minuto.</div>
 
-  <div class="card">
+  <div class="gcard">
     <h3>Como você está?</h3>
-    <div class="seg" style="margin-bottom:6px">
-      ${HUMORS.map((e,i)=>`<button class="${L.humor===i+1?'active':''}" onclick="setHumor(${i+1})" style="font-size:20px">${e}</button>`).join('')}
+    <div class="mood-row">
+      ${HUMORS.map((e,i)=>`<button type="button" class="mood-btn ${L.humor===i+1?'active':''}" onclick="setHumor(${i+1})" style="font-size:22px">${e}</button>`).join('')}
     </div>
   </div>
 
-  <div class="card">
+  <div class="gcard">
     <h3>Sintomas</h3>
     <div class="chips">
-      ${SINTOMAS.map(s=>`<button class="chip ${s!=='Sem sintomas'?'rose':''} ${L.sintomas.includes(s)?'active':''}" onclick="toggleSint('${s}')">${s}</button>`).join('')}
+      ${SINTOMAS.map(s=>`<button class="chip-glass ${s!=='Sem sintomas'?'rose':''} ${L.sintomas.includes(s)?'active':''}" onclick="toggleSint('${s}')">${s}</button>`).join('')}
     </div>
   </div>
 
-  <div class="card">
+  <div class="gcard">
     <div class="between"><h3 class="mb0">Água</h3><span class="muted" style="font-weight:800">${nf(L.agua||0)} / ${nf(S.profile.metaAgua)} L</span></div>
     <div class="waterrow" style="margin-top:12px">
       ${Array.from({length:metaGlasses}).map((_,i)=>dropSVG(i<glasses,i)).join('')}
     </div>
     <div class="quickrow">
-      <button class="btn btn-ghost btn-sm" onclick="addWater(0.25)">+ 1 copo (250 ml)</button>
-      <button class="btn btn-outline btn-sm" onclick="addWater(-0.25)">− copo</button>
+      <button class="btn-pill btn-sm ghost" onclick="addWater(0.25)">+ 1 copo (250 ml)</button>
+      <button class="btn-pill btn-sm ghost neutral" onclick="addWater(-0.25)">− copo</button>
     </div>
   </div>
 
-  <div class="card">
+  <div class="gcard">
     <div class="between"><h3 class="mb0">Meta proteica</h3><span class="muted" style="font-weight:800">${L.proteina||0} / ${S.profile.metaProteina} g</span></div>
     ${proteinBar(L.proteina||0,S.profile.metaProteina)}
     <div class="muted" style="font-size:12.5px;margin:2px 0 12px">${Math.round(Math.min(100,(L.proteina||0)/S.profile.metaProteina*100))}% da meta atingida hoje</div>
-    <button class="btn btn-ghost btn-block" onclick="go('proteina')">${icon('plus',true)} Registrar por alimento</button>
+    <button class="btn-pill block ghost" onclick="go('proteina')">${icon('plus',true)} Registrar por alimento</button>
   </div>
 
-  <div class="card">
+  <div class="gcard">
     <h3>Exercício</h3>
-    <div class="chips">${EXERC.map(e=>`<button class="chip ${L.exercicios.includes(e)?'active':''}" onclick="toggleEx('${e}')">${e}</button>`).join('')}</div>
+    <div class="chips">${EXERC.map(e=>`<button class="chip-glass ${L.exercicios.includes(e)?'active':''}" onclick="toggleEx('${e}')">${e}</button>`).join('')}</div>
   </div>
 
-  <div class="card">
+  <div class="gcard">
     <h3>Apetite hoje</h3>
-    <div class="chips">${APET.map(a=>`<button class="chip ${L.apetite===a?'active':''}" onclick="setApet('${a}')">${a}</button>`).join('')}</div>
+    <div class="chips">${APET.map(a=>`<button class="chip-glass ${L.apetite===a?'active':''}" onclick="setApet('${a}')">${a}</button>`).join('')}</div>
   </div>
 
-  <div class="card">
+  <div class="gcard">
     <h3>Vontade de comer por…</h3>
-    <div class="chips">${FOME.map(f=>`<button class="chip ${f!=='Nenhuma'?'rose':''} ${L.fomeEmocional===f?'active':''}" onclick="setFome('${f}')">${f}</button>`).join('')}</div>
+    <div class="chips">${FOME.map(f=>`<button class="chip-glass ${f!=='Nenhuma'?'rose':''} ${L.fomeEmocional===f?'active':''}" onclick="setFome('${f}')">${f}</button>`).join('')}</div>
   </div>`;
 }
 
@@ -527,7 +539,7 @@ function maisView(){
       {id:'timeline',t:'Linha do tempo',s:'Todos os eventos em ordem',ic:'clock'},
       {id:'conquistas',t:'Conquistas',s:'Marcos do tratamento',ic:'medal',amber:true},
       {id:'insights',t:'Insights',s:'Padrões cruzados dos seus registros',ic:'chart'},
-      {id:'planoacao',t:'Plano de Ação',s:'O que revisar na próxima consulta',ic:'flag'},
+      {id:'planoacao',t:'Plano de ação',s:'O que revisar na próxima consulta',ic:'flag'},
     ]],
     ['Saúde',[
       {id:'bio',t:'Bioimpedância',s:'Composição corporal ao longo do tempo',ic:'pulse'},
@@ -552,27 +564,27 @@ function maisView(){
   <div class="scr-sub">Sua jornada em detalhe.</div>
   ${grupos.map(([label,items])=>`
   <div class="gcard mais-group">
-    <div class="eyebrow2">${label}</div>
+    ${items.length>1?`<div class="eyebrow2">${label}</div>`:''}
     <div class="mais-list">${items.map(it=>row(it.ic,it.t,it.s,`go('mais','${it.id}')`,it.amber)).join('')}</div>
   </div>`).join('')}
   <div class="gcard mais-group">
-    <div class="eyebrow2">Conta</div>
     <div class="mais-list">${row('gear','Configurações e dados','Perfil, metas e preferências do app',"openSheet('perfil')")}</div>
   </div>`;
 }
 function maisSubView(sub){
   const back=`<button class="btn btn-outline btn-sm" onclick="go('mais')" style="margin-bottom:14px">${icon('chevron',false,true)} Voltar</button>`;
-  if(sub==='jornada') return back+journeyView();
-  if(sub==='insights') return back+renderComGate(FEATURES?.INSIGHTS, insightsView);
-  if(sub==='planoacao') return back+renderComGate(FEATURES?.ACTION_PLAN, planoAcaoView);
-  if(sub==='conquistas') return back+achView();
-  if(sub==='timeline') return back+renderComGate(FEATURES?.TIMELINE, timelineView);
-  if(sub==='bio') return back+bioView();
+  const backPremium=`<button class="btn-pill btn-sm ghost neutral" onclick="go('mais')" style="margin-bottom:14px">${icon('chevron',false,true)} Voltar</button>`;
+  if(sub==='jornada') return backPremium+journeyView();
+  if(sub==='insights') return backPremium+renderComGate(FEATURES?.INSIGHTS, insightsView);
+  if(sub==='planoacao') return backPremium+renderComGate(FEATURES?.ACTION_PLAN, planoAcaoView);
+  if(sub==='conquistas') return backPremium+achView();
+  if(sub==='timeline') return backPremium+renderComGate(FEATURES?.TIMELINE, timelineView);
+  if(sub==='bio') return backPremium+bioView();
   if(sub==='relatorio') return relatorioView(); /* cabeçalho próprio (Quiet Premium), sem o "Voltar" legado */
-  if(sub==='stats') return back+statsView();
-  if(sub==='calc') return back+calcView();
-  if(sub==='exames') return back+examesView();
-  if(sub==='agenda') return back+agendaView();
+  if(sub==='stats') return backPremium+statsView();
+  if(sub==='calc') return backPremium+calcView();
+  if(sub==='exames') return backPremium+examesView();
+  if(sub==='agenda') return backPremium+agendaView();
   return back;
 }
 
@@ -587,13 +599,13 @@ function journeyView(){
     `${l>=0&&currentWeight()>S.profile.pesoMeta?`Faltam ${nf(currentWeight()-S.profile.pesoMeta)} kg para sua meta de ${nf(S.profile.pesoMeta)} kg.`:'Você alcançou sua meta de peso.'}`;
   return `
   <div class="scr-title" style="margin-bottom:14px">Minha jornada</div>
-  <div class="journey">
+  <div class="gcard journey">
     ${logoSVG(30,'#fff')}
     <p class="q" style="margin-top:14px">${txt}</p>
     <div class="sig">Resumo gerado automaticamente</div>
   </div>
   <p class="muted center" style="font-size:12.5px;margin-top:14px">Você pode mostrar este resumo na próxima consulta.</p>
-  <button class="btn btn-ghost btn-block" onclick="shareJourney()">${icon('share',true)} Copiar resumo</button>`;
+  <button class="btn-pill block" onclick="shareJourney()">${icon('share',true)} Copiar resumo</button>`;
 }
 
 /* ---------- card fixo: acompanhamento profissional ---------- */
@@ -603,18 +615,18 @@ function careCard(){
   const past=[...cons].reverse().find(a=>daysBetween(todayISO(),a.date)<0);
   let line='';
   if(upcoming){const d=daysBetween(todayISO(),upcoming.date);
-    line=d===0?'📅 Você tem uma consulta marcada para hoje.':`📅 Sua próxima consulta é em ${d} dia(s), em ${fmtBRy(upcoming.date)}.`;}
+    line=d===0?'📅 Você tem uma consulta marcada para hoje.':`📅 Sua próxima consulta é em ${d} ${plural(d,'dia','dias')}, em ${fmtBRy(upcoming.date)}.`;}
   else if(past){const d=Math.abs(daysBetween(todayISO(),past.date));
     if(d>=45) line=`📅 Faz ${d} dias desde seu último retorno. Considere agendar uma nova consulta.`;}
   else line='📅 Você ainda não tem consultas registradas na agenda.';
-  return `<div class="card" style="border:1.5px solid var(--green)">
+  return `<div class="gcard" style="border:1.5px solid var(--accent)">
     <div class="row" style="gap:12px;align-items:flex-start">
-      <div class="badge-ico">${icon('steth')}</div>
+      <div class="badge-glow">${icon('steth')}</div>
       <div style="flex:1">
-        <div style="font-weight:800;font-size:14px;margin-bottom:5px">Seu tratamento é conduzido por profissionais</div>
-        <p style="margin:0;font-size:13px;line-height:1.55;color:var(--ink-soft)">O Compasso organiza seus registros, mas quem conduz o tratamento é a sua equipe de saúde. O <b>acompanhamento médico</b> é essencial para avaliar dose, prescrição e segurança; o <b>acompanhamento nutricional</b> garante proteína adequada, preservação da massa magra e o manejo dos sintomas ao longo do uso do análogo de GLP-1.</p>
-        ${line?`<p style="margin:11px 0 0;font-size:12.5px;font-weight:700;color:var(--ink)">${line}</p>`:''}
-        <button class="btn btn-ghost btn-sm" style="margin-top:12px" onclick="openSheet('compromisso')">${icon('cal',true)} Agendar consulta</button>
+        <div style="font-weight:800;font-size:14px;margin-bottom:5px;color:var(--tx-1)">Seu tratamento é conduzido por profissionais</div>
+        <p style="margin:0;font-size:13px;line-height:1.55;color:var(--tx-2)">O Compasso organiza seus registros, mas quem conduz o tratamento é a sua equipe de saúde. O <b>acompanhamento médico</b> é essencial para avaliar dose, prescrição e segurança; o <b>acompanhamento nutricional</b> garante proteína adequada, preservação da massa magra e o manejo dos sintomas ao longo do uso do análogo de GLP-1.</p>
+        ${line?`<p style="margin:11px 0 0;font-size:12.5px;font-weight:700;color:var(--tx-1)">${line}</p>`:''}
+        <button class="btn-pill btn-sm ghost" style="margin-top:12px" onclick="openSheet('compromisso')">${icon('cal',true)} Agendar consulta</button>
       </div>
     </div>
   </div>`;
@@ -627,22 +639,23 @@ function insightsView(){
   <div class="scr-sub">Padrões observados nos seus registros. Servem para você se conhecer melhor e não substituem a orientação do seu médico e nutricionista.</div>
   ${careCard()}
   ${ins.length?ins.map(i=>{const care=[i.justificativa,i.care].filter(Boolean).join(' ');
-    return `<div class="insight ${i.tone}"><span class="ico">${icon(i.icon||'spark')}</span>
+    const toneCls=i.tone==='amber'?'warn':i.tone==='rose'?'danger':'';
+    return `<div class="insight2 ${toneCls}"><span class="ico">${icon(i.icon||'spark')}</span>
     <p>${i.text}${care?`<span class="care">${care}</span>`:''}</p></div>`;}).join('')
-    :'<div class="card center muted" style="font-size:13px">Registre alguns dias no diário para começarmos a encontrar padrões.</div>'}`;
+    :'<div class="gcard center muted" style="font-size:13px">Registre alguns dias no diário para começarmos a encontrar padrões.</div>'}`;
 }
 
-const PLANO_TONE={alta:'rose',media:'amber',baixa:''};
+const PLANO_TONE={alta:'danger',media:'amber',baixa:''};
 const PLANO_STATUS_LABEL={nova:'Nova',em_acompanhamento:'Em acompanhamento',resolvida:'Resolvida'};
 function planoAcaoView(){
   const acoes=ACTIONPLAN ? ACTIONPLAN.gerar(buildActionPlanContext()) : [];
-  return `<div class="scr-title" style="margin-bottom:6px">Plano de Ação</div>
+  return `<div class="scr-title" style="margin-bottom:6px">Plano de ação</div>
   <div class="scr-sub">O que revisar na próxima consulta, a partir dos seus registros. Não substitui a orientação do seu médico e nutricionista.</div>
-  <div class="card mt14"><div class="list">
-    ${acoes.length?acoes.map(a=>`<div class="item">
-      <div class="badge-ico ${PLANO_TONE[a.prioridade]}">${icon('flag')}</div>
+  <div class="gcard mt14"><div class="hist-list">
+    ${acoes.length?acoes.map(a=>`<div class="hist-item">
+      <div class="badge-glow ${PLANO_TONE[a.prioridade]}">${icon('flag')}</div>
       <div><div class="t">${esc(a.titulo)}</div><div class="s">${esc(a.motivo)} ${esc(a.descricao)}</div></div>
-      <div class="r" style="font-size:11px">${PLANO_STATUS_LABEL[a.status]}${a.status!=='resolvida'?`<br><button class="btn btn-outline btn-sm" style="margin-top:4px" onclick="avancarStatusAcao('${esc(a.id)}')">Avançar</button>`:''}</div>
+      <div class="r" style="font-size:11px">${a.acionavel===false?'':PLANO_STATUS_LABEL[a.status]+(a.status!=='resolvida'?`<br><button class="btn-pill btn-sm ghost neutral" style="margin-top:4px" onclick="avancarStatusAcao('${esc(a.id)}')">Avançar</button>`:'')}</div>
     </div>`).join('')
       :'<p class="muted center" style="font-size:13px;padding:8px 0">Nenhuma ação pendente no momento — tudo em dia.</p>'}
   </div></div>`;
@@ -666,19 +679,19 @@ function renderComGate(feature, montarTela){
   return premiumGateView(feature);
 }
 const FEATURE_BENEFICIO={
-  timeline:{titulo:'Timeline Inteligente', desc:'Veja toda a sua jornada organizada em uma linha do tempo única — aplicações, pesagens, exames e conquistas, tudo em ordem.'},
+  timeline:{titulo:'Linha do tempo', desc:'Veja toda a sua jornada organizada em uma linha do tempo única — aplicações, pesagens, exames e conquistas, tudo em ordem.'},
   insights:{titulo:'Insights automáticos', desc:'Padrões identificados automaticamente nos seus registros, sem precisar analisar nada manualmente.'},
-  actionPlan:{titulo:'Plano de Ação personalizado', desc:'Saiba exatamente o que revisar na próxima consulta, priorizado pra você.'},
+  actionPlan:{titulo:'Plano de ação', desc:'Saiba exatamente o que revisar na próxima consulta, priorizado pra você.'},
   reports:{titulo:'Relatórios em PDF', desc:'Gere relatórios completos da sua evolução pra levar ao médico ou nutricionista.'},
   backup:{titulo:'Backup em nuvem', desc:'Seus dados protegidos e sincronizados entre dispositivos.'},
 };
 function premiumGateView(feature){
   const b=FEATURE_BENEFICIO[feature]||{titulo:'Recurso Premium', desc:'Esse recurso faz parte do plano Premium do Compasso.'};
-  return `<div class="card center" style="padding:32px 20px">
-    <div class="badge-ico amber" style="margin:0 auto 14px">${icon('medal')}</div>
+  return `<div class="gcard center" style="padding:32px 20px">
+    <div class="badge-glow amber" style="margin:0 auto 14px">${icon('medal')}</div>
     <div class="scr-title" style="font-size:19px;margin-bottom:6px">${esc(b.titulo)}</div>
     <p class="muted" style="font-size:13.5px;margin-bottom:18px">${esc(b.desc)}</p>
-    <button class="btn btn-primary btn-block" onclick="go('premium')">Ver planos Premium</button>
+    <button class="btn-pill block" onclick="go('premium')">Ver planos Premium</button>
   </div>`;
 }
 
@@ -689,41 +702,41 @@ let PREMIUM_VALIDANDO=false;
 function premiumView(){
   const plano=LICENSE?LICENSE.getPlan():'free';
   const status=LICENSE?LICENSE.getStatus():'active';
-  const beneficios=['Timeline Inteligente','Insights automáticos','Plano de Ação personalizado','Relatórios em PDF','Backup em nuvem','Recursos futuros inclusos'];
+  const beneficios=['Linha do tempo','Insights automáticos','Plano de ação','Relatórios em PDF','Backup em nuvem','Recursos futuros inclusos'];
   return `
-  <div class="ap-head">
+  <div class="ap-head ap-head-screen">
     <button type="button" class="ap-back" onclick="go('mais')" aria-label="Voltar">${CAL_CHEV_L}</button>
     <span class="ap-title">Compasso Premium</span>
     <span class="ap-head-spacer"></span>
   </div>
   <p class="scr-sub" style="margin-top:-6px">Desbloqueie todo o potencial do seu acompanhamento.</p>
 
-  ${plano!=='free'?`<div class="gcard tight" style="margin-bottom:16px"><div class="between">
+  ${plano!=='free'?`<div class="gcard tight" style="margin-bottom:14px"><div class="between">
     <div><div class="eyebrow2" style="margin:0">Seu plano atual</div><div style="font-size:15px;font-weight:700;color:var(--tx-1);margin-top:4px">${plano==='monthly'?'Premium Mensal':'Premium Anual'}</div></div>
-    <span class="badge-ico ${status==='active'?'':'amber'}">${icon('check')}</span>
+    <span class="badge-ico" style="${status==='active'?'background:var(--accent-soft);color:var(--accent)':'background:var(--warn2-soft);color:var(--warn2)'}">${icon('check')}</span>
   </div></div>`:''}
 
-  <div class="gcard tight" style="margin-bottom:16px">
+  <div class="gcard tight" style="margin-bottom:14px">
     <div class="eyebrow2">O que você desbloqueia</div>
     ${beneficios.map(b=>`<div class="row" style="gap:10px;padding:8px 0"><span style="color:var(--accent-light)">${icon('check')}</span><span style="font-size:13.5px;color:var(--tx-2)">${esc(b)}</span></div>`).join('')}
   </div>
 
-  <div class="gcard tight" style="border:1.5px solid var(--accent);position:relative;margin-bottom:12px">
-    <span style="position:absolute;top:-10px;right:14px;font-size:10.5px;font-weight:800;color:#fff;background:var(--accent);padding:3px 10px;border-radius:999px">MAIS POPULAR</span>
+  <div class="gcard tight" style="border:1.5px solid var(--accent);position:relative;margin-bottom:14px">
+    <span style="position:absolute;top:-10px;right:14px;font-size:10.5px;font-weight:800;color:var(--tx-1);background:var(--accent);padding:3px 10px;border-radius:999px">MAIS POPULAR</span>
     <div class="eyebrow2">Premium Anual</div>
     <div style="font-size:22px;font-weight:800;color:var(--tx-1);margin:4px 0 2px">${PRECOS.yearly}</div>
     <p style="font-size:12.5px;color:var(--tx-3);margin-bottom:14px">Equivale a menos por mês do que o plano mensal.</p>
     <button class="btn-pill block" onclick="assinarPlano('yearly')">Assinar plano anual</button>
   </div>
 
-  <div class="gcard tight" style="margin-bottom:18px">
+  <div class="gcard tight" style="margin-bottom:14px">
     <div class="eyebrow2">Premium Mensal</div>
     <div style="font-size:22px;font-weight:800;color:var(--tx-1);margin:4px 0 2px">${PRECOS.monthly}</div>
     <p style="font-size:12.5px;color:var(--tx-3);margin-bottom:14px">Cancele quando quiser.</p>
-    <button class="btn btn-outline btn-block" onclick="assinarPlano('monthly')">Assinar plano mensal</button>
+    <button class="btn-pill block ghost neutral" onclick="assinarPlano('monthly')">Assinar plano mensal</button>
   </div>
 
-  <button class="btn btn-outline btn-block" onclick="restaurarCompraPremium()">${PREMIUM_VALIDANDO?'Validando…':'Restaurar compra'}</button>
+  <button class="btn-pill block ghost neutral" onclick="restaurarCompraPremium()">${PREMIUM_VALIDANDO?'Validando…':'Restaurar compra'}</button>
   <p class="muted center" style="font-size:11.5px;margin-top:14px">A cobrança ainda não está disponível nesta versão do app.</p>`;
 }
 function assinarPlano(plano){
@@ -742,7 +755,7 @@ async function restaurarCompraPremium(){
 function achView(){
   const list=achievements();
   return `<div class="scr-title" style="margin-bottom:6px">Conquistas</div>
-  <div class="scr-sub">${list.filter(a=>a.on).length} de ${list.length} desbloqueadas</div>
+  <div class="scr-sub">${list.filter(a=>a.on).length} de ${list.length} desbloqueadas.</div>
   <div class="ach">${list.map(a=>`<div class="medal ${a.on?'on':''}">
     <div class="ic">${a.ic}</div><div class="mt">${a.t}</div><div class="ms">${a.s}</div></div>`).join('')}</div>`;
 }
@@ -752,7 +765,7 @@ function timelineView(){
   const ev=TIMELINE ? TIMELINE.gerar(buildTimelineContext()) : [];
   const ordenado=[...ev].reverse(); // motor devolve cronológico ascendente; tela mostra mais recente primeiro
   return `<div class="scr-title" style="margin-bottom:14px">Linha do tempo</div>
-  <div class="card"><div class="tl">
+  <div class="gcard"><div class="tl">
     ${ordenado.slice(0,40).map(e=>{
       const futuro = e.categoria==='agenda' && e.payload && e.payload.futuro;
       const tone = futuro ? 'future' : (TONE_POR_CATEGORIA[e.categoria]||'');
@@ -781,9 +794,9 @@ function statsView(){
   ];
   if(S.bio&&S.bio.length){const last=[...S.bio].sort((a,b)=>a.date<b.date?1:-1)[0];
     if(last.gordura!=null)cards.push(['Gordura corporal',nf(last.gordura)+'%']);
-    if(last.massaMagra!=null)cards.push(['Massa magra',nf(last.massaMagra)+' kg']);}
+    if(last.massaMagraPct!=null)cards.push(['Massa muscular',nf(last.massaMagraPct)+'%']);}
   return `<div class="scr-title" style="margin-bottom:14px">Estatísticas</div>
-  <div class="grid2">${cards.map(([k,v])=>`<div class="stat"><div class="k">${k}</div><div class="v" style="font-size:22px">${v}</div></div>`).join('')}</div>`;
+  <div class="grid2">${cards.map(([k,v])=>`<div class="stat-tile2"><div class="k">${k}</div><div class="v" style="font-size:22px">${v}</div></div>`).join('')}</div>`;
 }
 
 function calcView(){
@@ -796,11 +809,11 @@ function calcView(){
   ];
   return `<div class="scr-title" style="margin-bottom:6px">Calculadora</div>
   <div class="scr-sub">Quanto falta para cada objetivo, a partir de ${nf(cw)} kg.</div>
-  <div class="card"><div class="list">
+  <div class="gcard"><div class="hist-list">
     ${targets.map(([k,t])=>{if(t==null)return'';const d=+(cw-t).toFixed(1);
-      return `<div class="item"><div class="badge-ico ${d<=0?'':'amber'}">${d<=0?icon('check'):icon('flag')}</div>
+      return `<div class="hist-item"><div class="badge-glow ${d<=0?'':'amber'}">${d<=0?icon('check'):icon('flag')}</div>
       <div><div class="t">${k}</div><div class="s">Alvo: ${nf(t)} kg</div></div>
-      <div class="r" style="color:${d<=0?'var(--green)':'var(--ink)'}">${d<=0?'Alcançado':'faltam '+nf(d)+' kg'}</div></div>`;}).join('')}
+      <div class="r" style="color:${d<=0?'var(--accent)':'var(--tx-1)'}">${d<=0?'Alcançado':'faltam '+nf(d)+' kg'}</div></div>`;}).join('')}
   </div></div>`;
 }
 
@@ -809,9 +822,9 @@ function examesView(){
   const byType={}; ex.forEach(e=>{(byType[e.tipo]=byType[e.tipo]||[]).push(e);});
   return `<div class="scr-title" style="margin-bottom:6px">Exames</div>
   <div class="scr-sub">Guarde resultados e acompanhe a evolução.</div>
-  <button class="btn btn-primary btn-block" onclick="openSheet('exame')">${icon('plus',true)} Adicionar resultado</button>
-  <div class="card mt14"><div class="list">
-    ${ex.length?ex.map(e=>`<div class="item"><div class="badge-ico">${icon('flask')}</div>
+  <button class="btn-pill block" onclick="openSheet('exame')">${icon('plus',true)} Novo exame</button>
+  <div class="gcard mt14"><div class="hist-list">
+    ${ex.length?ex.map(e=>`<div class="hist-item"><div class="badge-glow">${icon('flask')}</div>
       <div><div class="t">${esc(e.tipo)}</div><div class="s">${fmtBRy(e.date)}</div></div>
       <div class="r">${esc(e.valor)}</div></div>`).join('')
       :'<p class="muted center" style="font-size:13px;padding:8px 0">Nenhum exame guardado ainda.</p>'}
@@ -822,12 +835,12 @@ function agendaView(){
   const ag=[...S.agenda].sort((a,b)=>a.date<b.date?-1:1).filter(a=>daysAgo(a.date)<=0||true);
   return `<div class="scr-title" style="margin-bottom:6px">Agenda</div>
   <div class="scr-sub">Consultas, exames e retornos.</div>
-  <button class="btn btn-primary btn-block" onclick="openSheet('compromisso')">${icon('plus',true)} Novo compromisso</button>
-  <div class="card mt14"><div class="list">
+  <button class="btn-pill block" onclick="openSheet('compromisso')">${icon('plus',true)} Novo compromisso</button>
+  <div class="gcard mt14"><div class="hist-list">
     ${ag.length?ag.map(a=>{const d=daysBetween(todayISO(),a.date);
-      return `<div class="item"><div class="badge-ico ${d<0?'':'amber'}">${icon('cal')}</div>
+      return `<div class="hist-item"><div class="badge-glow ${d<0?'':'amber'}">${icon('cal')}</div>
       <div><div class="t">${esc(a.tipo)}</div><div class="s">${esc(a.obs||'')}</div></div>
-      <div class="r" style="font-size:12px">${fmtBRy(a.date)}<br><span class="faint" style="font-weight:700">${d===0?'hoje':d>0?'em '+d+'d':Math.abs(d)+'d atrás'}</span></div></div>`;}).join('')
+      <div class="r" style="font-size:12px">${fmtBRy(a.date)}<br><span style="font-weight:700;color:var(--tx-3)">${d===0?'hoje':d>0?'em '+d+'d':Math.abs(d)+'d atrás'}</span></div></div>`;}).join('')
       :'<p class="muted center" style="font-size:13px;padding:8px 0">Nenhum compromisso agendado.</p>'}
   </div></div>`;
 }
@@ -890,20 +903,19 @@ function closeSheet(){const b=document.getElementById('bd');if(b)b.remove();SHEE
 function renderSheet(){
   let old=document.getElementById('bd'); if(old)old.remove();
   if(!SHEET)return;
-  const premium=SHEET==='aplicar'||SHEET==='perfil';
-  const bd=document.createElement('div');bd.className=premium?'backdrop-glass':'backdrop';bd.id='bd';
+  const bd=document.createElement('div');bd.className='backdrop-glass';bd.id='bd';
   bd.onclick=e=>{if(e.target===bd)closeSheet();};
-  bd.innerHTML=premium?`<div class="sheet-glass">${sheetBody(SHEET)}</div>`:`<div class="sheet"><div class="grab"></div>${sheetBody(SHEET)}</div>`;
+  bd.innerHTML=`<div class="sheet-glass"><div class="grab"></div>${sheetBody(SHEET)}</div>`;
   document.body.appendChild(bd);
   bindSheet(SHEET);
 }
 function sheetBody(id){
   if(id==='menuadd') return `<h2>Registrar</h2><p class="sub">O que você quer anotar agora?</p>
     <div class="quickrow" style="grid-template-columns:1fr 1fr;gap:10px">
-      <button class="btn btn-primary" onclick="closeSheet();openSheet('aplicar')">${icon('syringe',true)} Aplicação</button>
-      <button class="btn btn-ghost" onclick="closeSheet();openSheet('pesar')">${icon('scale',true)} Pesagem</button>
-      <button class="btn btn-outline" onclick="closeSheet();go('diario')">${icon('book',true)} Diário</button>
-      <button class="btn btn-outline" onclick="closeSheet();openSheet('exame')">${icon('flask',true)} Exame</button>
+      <button class="btn-pill" onclick="closeSheet();openSheet('aplicar')">${icon('syringe',true)} Aplicação</button>
+      <button class="btn-pill ghost neutral" onclick="closeSheet();openSheet('pesar')">${icon('scale',true)} Pesagem</button>
+      <button class="btn-pill ghost neutral" onclick="closeSheet();go('diario')">${icon('book',true)} Diário</button>
+      <button class="btn-pill ghost neutral" onclick="closeSheet();openSheet('exame')">${icon('flask',true)} Exame</button>
     </div>`;
   if(id==='aplicar'){
     tmp.local=tmp.local||(lastAppNext());
@@ -912,8 +924,7 @@ function sheetBody(id){
     tmp.humor=tmp.humor||todayLog().humor||0;
     const meds=['Ozempic','Wegovy','Mounjaro','Zepbound','Saxenda','Outro'];
     const medIdx=Math.max(0,meds.indexOf(S.profile.medicamento));
-    return `<div class="grab"></div>
-      <div class="ap-head">
+    return `<div class="ap-head">
         <button type="button" class="ap-back" onclick="closeSheet()" aria-label="Fechar">${CAL_CHEV_L}</button>
         <span class="ap-title">Nova aplicação</span>
         <span class="ap-head-spacer"></span>
@@ -945,52 +956,55 @@ function sheetBody(id){
   }
   if(id==='pesar'){
     return `<h2>Nova pesagem</h2><p class="sub">Peso, medidas e uma foto (opcional).</p>
-      <div class="field-2"><div class="field"><label for="pw-date">Data</label><input type="date" id="pw-date" value="${todayISO()}"></div>
-      <div class="field"><label for="pw-peso">Peso (kg)</label><input id="pw-peso" inputmode="decimal" placeholder="${nf(currentWeight())}"></div></div>
-      <div class="eyebrow" style="margin:6px 0 8px">Medidas (cm) · opcional</div>
-      <div class="field-2"><div class="field"><label for="pw-cintura">Cintura</label><input id="pw-cintura" inputmode="decimal"></div>
-      <div class="field"><label for="pw-quadril">Quadril</label><input id="pw-quadril" inputmode="decimal"></div></div>
-      <div class="field-2"><div class="field"><label for="pw-abdomen">Abdômen</label><input id="pw-abdomen" inputmode="decimal"></div>
-      <div class="field"><label for="pw-coxa">Coxa</label><input id="pw-coxa" inputmode="decimal"></div></div>
-      <div class="field"><label for="pw-braco">Braço</label><input id="pw-braco" inputmode="decimal"></div>
-      <div class="field"><label for="pw-foto">Foto de evolução (opcional)</label><input type="file" accept="image/*" id="pw-foto"></div>
-      <button class="btn btn-primary btn-block" onclick="savePesagem()">Salvar pesagem</button>`;
+      <div class="glass-field-2"><div class="glass-field"><label for="pw-date">Data</label><label class="field-wrap" for="pw-date"><input type="date" id="pw-date" value="${todayISO()}"></label></div>
+      <div class="glass-field"><label for="pw-peso">Peso (kg)</label><label class="field-wrap" for="pw-peso"><input id="pw-peso" inputmode="decimal" placeholder="${nf(currentWeight())}"></label></div></div>
+      <div class="eyebrow2" style="margin:6px 0 8px">Medidas (cm) · opcional</div>
+      <div class="glass-field-2"><div class="glass-field"><label for="pw-cintura">Cintura</label><label class="field-wrap" for="pw-cintura"><input id="pw-cintura" inputmode="decimal"></label></div>
+      <div class="glass-field"><label for="pw-quadril">Quadril</label><label class="field-wrap" for="pw-quadril"><input id="pw-quadril" inputmode="decimal"></label></div></div>
+      <div class="glass-field-2"><div class="glass-field"><label for="pw-abdomen">Abdômen</label><label class="field-wrap" for="pw-abdomen"><input id="pw-abdomen" inputmode="decimal"></label></div>
+      <div class="glass-field"><label for="pw-coxa">Coxa</label><label class="field-wrap" for="pw-coxa"><input id="pw-coxa" inputmode="decimal"></label></div></div>
+      <div class="glass-field"><label for="pw-braco">Braço</label><label class="field-wrap" for="pw-braco"><input id="pw-braco" inputmode="decimal"></label></div>
+      <div class="glass-field"><label for="pw-foto">Foto de evolução (opcional)</label><label class="field-wrap" for="pw-foto" style="cursor:pointer"><span id="pw-foto-label">Escolher foto</span><input type="file" accept="image/*" id="pw-foto" style="display:none" onchange="document.getElementById('pw-foto-label').textContent=this.files[0]?this.files[0].name:'Escolher foto'"></label></div>
+      <button id="pw-save-btn" class="btn-pill block" onclick="savePesagem()">Salvar pesagem</button>`;
   }
   if(id==='caneta'){
     return `<h2>Controle da caneta</h2><p class="sub">Acompanhe quantas aplicações ainda restam.</p>
-      <div class="field-2"><div class="field"><label for="pn-cap">Capacidade (mg)</label><input id="pn-cap" inputmode="decimal" value="${S.pen.capacidadeMg||''}" placeholder="ex: 60"></div>
-      <div class="field"><label for="pn-dose">Dose semanal (mg)</label><input id="pn-dose" inputmode="decimal" value="${S.pen.doseMg||''}" placeholder="ex: 7,5"></div></div>
-      <div class="field"><label for="pn-used">Aplicações já feitas com esta caneta</label><input id="pn-used" inputmode="numeric" value="${S.pen.usadas||0}"></div>
-      <button class="btn btn-primary btn-block" onclick="savePen()">Salvar caneta</button>`;
+      <div class="glass-field-2"><div class="glass-field"><label for="pn-cap">Capacidade (mg)</label><label class="field-wrap" for="pn-cap"><input id="pn-cap" inputmode="decimal" value="${S.pen.capacidadeMg||''}" placeholder="ex: 60"></label></div>
+      <div class="glass-field"><label for="pn-dose">Dose semanal (mg)</label><label class="field-wrap" for="pn-dose"><input id="pn-dose" inputmode="decimal" value="${S.pen.doseMg||''}" placeholder="ex: 7,5"></label></div></div>
+      <div class="glass-field"><label for="pn-used">Aplicações já feitas com esta caneta</label><label class="field-wrap" for="pn-used"><input id="pn-used" inputmode="numeric" value="${S.pen.usadas||0}"></label></div>
+      <button class="btn-pill block" onclick="savePen()">Salvar caneta</button>`;
   }
   if(id==='exame'){
     const tipos=['Hemoglobina glicada','Colesterol total','Triglicerídeos','Vitamina D','Vitamina B12','Ferritina','TSH','Outro'];
-    return `<h2>Adicionar exame</h2><p class="sub">Guarde o resultado para acompanhar a evolução.</p>
-      <div class="field"><label for="ex-tipo">Exame</label><select id="ex-tipo">${tipos.map(t=>`<option>${t}</option>`).join('')}</select></div>
-      <div class="field-2"><div class="field"><label for="ex-date">Data</label><input type="date" id="ex-date" value="${todayISO()}"></div>
-      <div class="field"><label for="ex-val">Resultado</label><input id="ex-val" placeholder="ex: 5,4%"></div></div>
-      <button class="btn btn-primary btn-block" onclick="saveExame()">Salvar exame</button>`;
+    return `<h2>Novo exame</h2><p class="sub">Guarde o resultado para acompanhar a evolução.</p>
+      <div class="glass-field"><label for="ex-tipo">Exame</label><label class="field-wrap" for="ex-tipo"><select id="ex-tipo">${tipos.map(t=>`<option>${t}</option>`).join('')}</select></label></div>
+      <div class="glass-field-2"><div class="glass-field"><label for="ex-date">Data</label><label class="field-wrap" for="ex-date"><input type="date" id="ex-date" value="${todayISO()}"></label></div>
+      <div class="glass-field"><label for="ex-val">Resultado</label><label class="field-wrap" for="ex-val"><input id="ex-val" placeholder="ex: 5,4%"></label></div></div>
+      <button class="btn-pill block" onclick="saveExame()">Salvar exame</button>`;
   }
   if(id==='compromisso'){
     const tipos=['Consulta','Exame','Retorno','Renovar receita','Comprar caneta'];
     return `<h2>Novo compromisso</h2><p class="sub">Nunca perca um retorno ou uma receita vencendo.</p>
-      <div class="field"><label for="cp-tipo">Tipo</label><select id="cp-tipo">${tipos.map(t=>`<option>${t}</option>`).join('')}</select></div>
-      <div class="field"><label for="cp-date">Data</label><input type="date" id="cp-date" value="${todayISO()}"></div>
-      <div class="field"><label for="cp-obs">Observação</label><input id="cp-obs" placeholder="opcional"></div>
-      <button class="btn btn-primary btn-block" onclick="saveCompromisso()">Agendar</button>`;
+      <div class="glass-field"><label for="cp-tipo">Tipo</label><label class="field-wrap" for="cp-tipo"><select id="cp-tipo">${tipos.map(t=>`<option>${t}</option>`).join('')}</select></label></div>
+      <div class="glass-field"><label for="cp-date">Data</label><label class="field-wrap" for="cp-date"><input type="date" id="cp-date" value="${todayISO()}"></label></div>
+      <div class="glass-field"><label for="cp-obs">Observação</label><label class="field-wrap" for="cp-obs"><input id="cp-obs" placeholder="opcional"></label></div>
+      <button class="btn-pill block" onclick="saveCompromisso()">Agendar</button>`;
   }
   if(id==='bio'){
     return `<h2>Nova bioimpedância</h2><p class="sub">Preencha os campos que sua balança ou exame informar. Todos são opcionais.</p>
-      <div class="field"><label for="bi-date">Data</label><input type="date" id="bi-date" value="${todayISO()}"></div>
-      <div class="field-2"><div class="field"><label for="bi-gordura">Gordura corporal (%)</label><input id="bi-gordura" inputmode="decimal" placeholder="ex: 35,1"></div>
-      <div class="field"><label for="bi-massaMagra">Massa magra (kg)</label><input id="bi-massaMagra" inputmode="decimal" placeholder="ex: 53,5"></div></div>
-      <div class="field-2"><div class="field"><label for="bi-musculo">Massa muscular (kg)</label><input id="bi-musculo" inputmode="decimal" placeholder="opcional"></div>
-      <div class="field"><label for="bi-agua">Água corporal (%)</label><input id="bi-agua" inputmode="decimal" placeholder="opcional"></div></div>
-      <div class="field-2"><div class="field"><label for="bi-visceral">Gordura visceral</label><input id="bi-visceral" inputmode="decimal" placeholder="nível"></div>
-      <div class="field"><label for="bi-tmb">Metabolismo basal (kcal)</label><input id="bi-tmb" inputmode="numeric" placeholder="opcional"></div></div>
-      <button class="btn btn-primary btn-block" onclick="saveBio()">Salvar bioimpedância</button>`;
+      <div class="glass-field"><label for="bi-date">Data</label><label class="field-wrap" for="bi-date"><input type="date" id="bi-date" value="${todayISO()}"></label></div>
+      <div class="glass-field-2"><div class="glass-field"><label for="bi-gordura">Gordura corporal (%)</label><label class="field-wrap" for="bi-gordura"><input id="bi-gordura" inputmode="decimal" placeholder="ex: 35,1"></label></div>
+      <div class="glass-field"><label for="bi-massaMagraPct">Massa muscular (%)</label><label class="field-wrap" for="bi-massaMagraPct"><input id="bi-massaMagraPct" inputmode="decimal" placeholder="ex: 58,0"></label></div></div>
+      <div class="glass-field-2"><div class="glass-field"><label for="bi-musculo">Massa muscular (kg)</label><label class="field-wrap" for="bi-musculo"><input id="bi-musculo" inputmode="decimal" placeholder="opcional"></label></div>
+      <div class="glass-field"><label for="bi-agua">Água corporal (%)</label><label class="field-wrap" for="bi-agua"><input id="bi-agua" inputmode="decimal" placeholder="opcional"></label></div></div>
+      <div class="glass-field-2"><div class="glass-field"><label for="bi-visceral">Gordura visceral</label><label class="field-wrap" for="bi-visceral"><input id="bi-visceral" inputmode="decimal" placeholder="nível"></label></div>
+      <div class="glass-field"><label for="bi-tmb">Metabolismo basal (kcal)</label><label class="field-wrap" for="bi-tmb"><input id="bi-tmb" inputmode="numeric" placeholder="opcional"></label></div></div>
+      <button class="btn-pill block" onclick="saveBio()">Salvar bioimpedância</button>`;
   }
   if(id==='perfil') return configuracoesView();
+  if(id==='confirmarReset') return `<h2>Excluir todos os dados?</h2><p class="sub">Isso exclui permanentemente tudo o que você registrou no Compasso — pesagens, aplicações, diário, exames e configurações. Esta ação não pode ser desfeita.</p>
+    <button class="btn-pill block ghost neutral" onclick="openSheet('perfil')">Cancelar</button>
+    <button class="btn-pill block danger" style="margin-top:10px" onclick="confirmarResetAll()">Excluir tudo</button>`;
   return '';
 }
 
@@ -1048,13 +1062,13 @@ function cfgAssinaturaSecao(){
     </button>`;
 }
 function cfgDadosSecao(){
-  return `<button type="button" class="mais-item" onclick="doLogout()">
+  return `<button type="button" id="logout-btn" class="mais-item" onclick="doLogout()">
       <span class="badge-glow">${icon('down')}</span>
       <span class="mais-item-text"><span class="mais-item-t">Sair da conta</span><span class="mais-item-s">Encerra sua sessão neste dispositivo</span></span>
     </button>
     <button type="button" class="mais-item danger" onclick="resetAll()">
       <span class="badge-glow danger">${icon('alert')}</span>
-      <span class="mais-item-text"><span class="mais-item-t">Apagar todos os dados</span><span class="mais-item-s">Remove permanentemente tudo o que você registrou</span></span>
+      <span class="mais-item-text"><span class="mais-item-t">Excluir todos os dados</span><span class="mais-item-s">Exclui permanentemente tudo o que você registrou</span></span>
     </button>`;
 }
 const NOTIF_TOGGLES=[
@@ -1090,7 +1104,7 @@ function cfgNotificacoesSecao(){
   const prefs = NOTIF ? NOTIF.loadPrefs() : {aplicacao:true,pesagem:true,agua:true,proteina:true,agenda:true,exames:true,caneta:true,metas:true,pesagemFrequencia:'semanal'};
   const permissao = NOTIF ? NOTIF.permission : 'unsupported';
   const permBanner = permissao==='granted' ? '' : `
-    <button type="button" class="mais-item" onclick="ativarNotificacoes()">
+    <button type="button" id="ativar-notif-btn" class="mais-item" onclick="ativarNotificacoes()">
       <span class="badge-glow amber">${icon('bell')}</span>
       <span class="mais-item-text"><span class="mais-item-t">Ativar notificações</span><span class="mais-item-s">${permissao==='denied'?'Bloqueadas no navegador — ative nas configurações do dispositivo':'Toque para permitir lembretes do Compasso'}</span></span>
     </button>`;
@@ -1104,7 +1118,9 @@ function cfgNotificacoesSecao(){
 }
 async function ativarNotificacoes(){
   if(!NOTIF) return;
-  await NOTIF.requestPermission();
+  await withAuthBtn('ativar-notif-btn','Ativando…',async()=>{
+    await NOTIF.requestPermission();
+  });
   render();
 }
 /* Seções futuras (Conta, Privacidade, Integrações) entram aqui como
@@ -1114,8 +1130,7 @@ function configuracoesView(){
   const p=S.profile, ic=obIcon;
   const meds=['Ozempic','Wegovy','Mounjaro','Zepbound','Saxenda','Outro'];
   const medIdx=Math.max(0,meds.indexOf(p.medicamento));
-  return `<div class="grab"></div>
-    <h2>Configurações</h2><p class="sub">Seu perfil, preferências e dados em um só lugar.</p>
+  return `<h2>Configurações</h2><p class="sub">Seu perfil, preferências e dados em um só lugar.</p>
 
     ${cfgGroup('Assinatura',cfgAssinaturaSecao())}
 
@@ -1126,7 +1141,9 @@ function configuracoesView(){
 
     ${cfgGroup('Notificações',cfgNotificacoesSecao(),'margin-top:14px')}
 
-    ${cfgGroup('Dados',cfgDadosSecao(),'margin-top:14px;margin-bottom:2px')}`;
+    ${cfgGroup('Dados',cfgDadosSecao(),'margin-top:14px;margin-bottom:2px')}
+
+    <p class="muted center" style="font-size:11.5px;margin-top:14px">Compasso v1.0.0</p>`;
 }
 function lastAppNext(){ // sugere próximo local no rodízio
   const order=['Abdômen','Coxa direita','Coxa esquerda','Braço direito','Braço esquerdo'];
@@ -1196,8 +1213,12 @@ function savePesagem(){
     if(date===todayISO() && NOTIF) NOTIF.cancelPesagemHoje();
     save();closeSheet();toast('Pesagem salva');render();
   };
-  if(file){ toast('Processando foto…'); downscale(file,700,dataUrl=>{rec.foto=dataUrl;finish();}); }
-  else finish();
+  if(file){
+    const btn=document.getElementById('pw-save-btn');
+    if(btn){ btn.disabled=true; btn.textContent='Processando foto…'; }
+    toast('Processando foto…');
+    downscale(file,700,dataUrl=>{rec.foto=dataUrl;finish();});
+  } else finish();
 }
 function savePen(){
   const prevId=S.pen&&S.pen.id;
@@ -1218,7 +1239,7 @@ function saveBio(){
   const date=val('bi-date');
   const prev=S.bio.find(b=>b.date===date);
   const rec={id:prev?prev.id:crypto.randomUUID(),date};
-  ['gordura','massaMagra','musculo','agua','visceral','tmb'].forEach(k=>{const v=numBR(val('bi-'+k));if(v!=null)rec[k]=v;});
+  ['gordura','massaMagraPct','musculo','agua','visceral','tmb'].forEach(k=>{const v=numBR(val('bi-'+k));if(v!=null)rec[k]=v;});
   if(Object.keys(rec).length<3){toast('Preencha ao menos um valor');return;}
   S.bio=S.bio.filter(b=>b.date!==date); S.bio.push(rec);
   save();closeSheet();toast('Bioimpedância registrada');render();
@@ -1232,9 +1253,10 @@ function savePerfil(){
   save();closeSheet();toast('Configurações salvas');render();
 }
 function resetAll(){
-  if(confirm('Apagar todos os dados e recomeçar? Esta ação não pode ser desfeita.')){
-    S=null;store.set(KEY,'');go('inicio');
-  }
+  openSheet('confirmarReset');
+}
+function confirmarResetAll(){
+  S=null;store.set(KEY,'');closeSheet();go('inicio');
 }
 
 /* ---------- diário actions ---------- */
@@ -1345,7 +1367,7 @@ function obView(){
           ${dateFieldCustom('o-data','cal',todayISO())}</div>
       </div>
       <button class="btn-pill block" onclick="startNew()">Começar minha jornada
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        ${AUTH_ARROW}
       </button>
     </div>
     <button class="btn-pill block ghost neutral" onclick="startExample()">Ver com dados de exemplo</button>
@@ -1518,7 +1540,7 @@ function ringSVG(prog,dose,unit){
 function dropSVG(filled,i){
   return `<div class="drop" onclick="setWater(${i+1})"><svg viewBox="0 0 24 30">
     <path d="M12 1 C12 1 3 12 3 19 a9 9 0 0 0 18 0 C21 12 12 1 12 1 Z"
-      fill="${filled?'var(--green)':'none'}" stroke="${filled?'var(--green)':'var(--track)'}" stroke-width="2"/></svg></div>`;
+      fill="${filled?'var(--accent)':'none'}" stroke="${filled?'var(--accent)':'var(--nv-border-strong)'}" stroke-width="2"/></svg></div>`;
 }
 function setWater(n){const L=todayLog();L.agua=+(n*0.25).toFixed(2);save();render();}
 
@@ -1666,6 +1688,8 @@ function icon(name,white,flip){
     down:'<path d="M12 4v11"/><path d="M7 11l5 5 5-5"/><path d="M5 20h14"/>',
     scale2:'<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9l3-3 3 3"/>',
     bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
+    sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2.5M12 19.5V22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M2 12h2.5M19.5 12H22M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/>',
+    moon:'<path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11z"/>',
   };
   return `<svg ${s} style="${flip?'transform:scaleX(-1)':''}">${P[name]||''}</svg>`;
 }
@@ -1712,27 +1736,27 @@ function eggControl(L){
   return `<div class="eggrow">${dots}</div>
     <div class="protresult"><b>${q} ${q===1?'ovo':'ovos'}</b> ≈ ${q*6} g de proteína</div>
     <div class="row" style="gap:8px;margin-top:10px">
-      <button class="btn btn-outline btn-sm" style="flex:0 0 64px" onclick="addProtQty('ovo',-1)" aria-label="Remover um ovo">−</button>
-      <button class="btn btn-ghost btn-sm" style="flex:1" onclick="addProtQty('ovo',1)">+ 1 ovo</button></div>`;
+      <button class="btn-pill btn-sm ghost neutral" style="flex:0 0 64px" onclick="addProtQty('ovo',-1)" aria-label="Remover um ovo">−</button>
+      <button class="btn-pill btn-sm ghost" style="flex:1" onclick="addProtQty('ovo',1)">+ 1 ovo</button></div>`;
 }
 function gramControl(s,L){
   const q=L.prot[s.id]||0, u=s.mode==='ml'?'ml':'g';
   const quick=s.mode==='ml'?[100,200]:[50,100,150];
-  return `<div class="field" style="margin:0 0 10px"><label>Quantidade (${u})</label>
-    <input inputmode="decimal" value="${q||''}" onchange="commitProt('${s.id}',this.value)" placeholder="ex: ${s.mode==='ml'?'200':'120'}"></div>
+  return `<div class="glass-field" style="margin:0 0 10px"><label>Quantidade (${u})</label>
+    <label class="field-wrap"><input inputmode="decimal" value="${q||''}" onchange="commitProt('${s.id}',this.value)" placeholder="ex: ${s.mode==='ml'?'200':'120'}"></label></div>
     <div class="chips" style="margin-bottom:12px">
-      ${quick.map(g=>`<button class="chip" onclick="addProtQty('${s.id}',${g})">+ ${g} ${u}</button>`).join('')}
-      ${s.unit?`<button class="chip" onclick="addProtQty('${s.id}',${s.unit.g})">+ 1 ${s.unit.label}</button>`:''}
-      ${q?`<button class="chip" onclick="setProt('${s.id}',0)">zerar</button>`:''}
+      ${quick.map(g=>`<button class="chip-glass" onclick="addProtQty('${s.id}',${g})">+ ${g} ${u}</button>`).join('')}
+      ${s.unit?`<button class="chip-glass" onclick="addProtQty('${s.id}',${s.unit.g})">+ 1 ${s.unit.label}</button>`:''}
+      ${q?`<button class="chip-glass" onclick="setProt('${s.id}',0)">zerar</button>`:''}
     </div>
     <div class="protresult">${q?`${nf(q,0)} ${u} ≈ <b>${Math.round(protGrams(s.id,q))} g</b> de proteína`:'Adicione a quantidade consumida'}</div>`;
 }
 function outrosControl(L){
   const q=L.prot.outros||0;
-  return `<div class="field" style="margin:0 0 10px"><label>Proteína de outras fontes (g)</label>
-    <input inputmode="numeric" value="${q||''}" onchange="commitProt('outros',this.value)" placeholder="whey, leguminosas, tofu…"></div>
-    <div class="chips" style="margin-bottom:12px">${[10,20,30].map(g=>`<button class="chip" onclick="addProtQty('outros',${g})">+ ${g} g</button>`).join('')}
-      ${q?`<button class="chip" onclick="setProt('outros',0)">zerar</button>`:''}</div>
+  return `<div class="glass-field" style="margin:0 0 10px"><label>Proteína de outras fontes (g)</label>
+    <label class="field-wrap"><input inputmode="numeric" value="${q||''}" onchange="commitProt('outros',this.value)" placeholder="whey, leguminosas, tofu…"></label></div>
+    <div class="chips" style="margin-bottom:12px">${[10,20,30].map(g=>`<button class="chip-glass" onclick="addProtQty('outros',${g})">+ ${g} g</button>`).join('')}
+      ${q?`<button class="chip-glass" onclick="setProt('outros',0)">zerar</button>`:''}</div>
     <div class="protresult">${q?`<b>${q} g</b> de outras fontes`:'Whey, leguminosas, tofu, suplementos…'}</div>`;
 }
 function proteinaView(){
@@ -1740,18 +1764,18 @@ function proteinaView(){
   const pct=Math.round(Math.min(100,cur/goal*100));
   const card=s=>{const q=L.prot[s.id]||0, g=Math.round(protGrams(s.id,q)), open=protOpen===s.id;
     const qtxt=q?(s.mode==='unit'?q+' un':nf(q,0)+(s.mode==='ml'?' ml':' g')):'';
-    return `<div class="card protcard ${open?'open':''}">
+    return `<div class="gcard protcard ${open?'open':''}">
       <div class="between" onclick="toggleProtCard('${s.id}')">
         <div class="row"><span class="pemoji">${s.emoji}</span>
-          <div><div style="font-weight:800">${s.nome}</div>
+          <div><div style="font-weight:800;color:var(--tx-1)">${s.nome}</div>
           <div class="muted" style="font-size:12px">${q?qtxt+' · '+g+' g proteína':'toque para adicionar'}</div></div></div>
-        <span class="row" style="gap:2px;font-weight:800;color:var(--green)">${g?g+' g':''}${icon('chevron')}</span>
+        <span class="row" style="gap:2px;font-weight:800;color:var(--accent)">${g?g+' g':''}${icon('chevron')}</span>
       </div>
       ${open?`<div class="protbody">${s.id==='ovo'?eggControl(L):gramControl(s,L)}</div>`:''}
     </div>`;};
   const outQ=L.prot.outros||0;
   return `
-  <button class="btn btn-outline btn-sm" onclick="go('diario')" style="margin-bottom:12px">${icon('chevron',false,true)} Diário</button>
+  <button class="btn-pill btn-sm ghost neutral" onclick="go('diario')" style="margin-bottom:12px">${icon('chevron',false,true)} Diário</button>
   <div class="scr-title" style="margin-bottom:4px">Meta proteica</div>
   <div class="scr-sub">Toque nas fontes que você comeu hoje. O app estima a proteína, sem precisar pesar tudo.</div>
 
@@ -1764,12 +1788,12 @@ function proteinaView(){
 
   ${PROT.map(card).join('')}
 
-  <div class="card protcard ${protOpen==='outros'?'open':''}">
+  <div class="gcard protcard ${protOpen==='outros'?'open':''}">
     <div class="between" onclick="toggleProtCard('outros')">
       <div class="row"><span class="pemoji">➕</span>
-        <div><div style="font-weight:800">Outras fontes</div>
+        <div><div style="font-weight:800;color:var(--tx-1)">Outras fontes</div>
         <div class="muted" style="font-size:12px">${outQ?outQ+' g proteína':'whey, leguminosas, tofu…'}</div></div></div>
-      <span class="row" style="gap:2px;font-weight:800;color:var(--green)">${outQ?outQ+' g':''}${icon('chevron')}</span>
+      <span class="row" style="gap:2px;font-weight:800;color:var(--accent)">${outQ?outQ+' g':''}${icon('chevron')}</span>
     </div>
     ${protOpen==='outros'?`<div class="protbody">${outrosControl(L)}</div>`:''}
   </div>
@@ -1782,7 +1806,7 @@ function proteinaView(){
    ============================================================ */
 const BIOM=[
   {id:'gordura',   nome:'Gordura corporal',  un:'%',    better:'down'},
-  {id:'massaMagra',nome:'Massa magra',       un:'kg',   better:'up'},
+  {id:'massaMagraPct',nome:'Massa muscular (%)',un:'%',better:'up'},
   {id:'musculo',   nome:'Massa muscular',    un:'kg',   better:'up'},
   {id:'agua',      nome:'Água corporal',     un:'%',    better:'up'},
   {id:'visceral',  nome:'Gordura visceral',  un:'',     better:'down'},
@@ -1792,35 +1816,36 @@ function fmtBio(v,un){if(un==='kcal')return nf(v,0);return v%1===0?nf(v,0):nf(v,
 function bioView(){
   if(!S.bio)S.bio=[];
   const b=[...S.bio].sort((x,y)=>x.date<y.date?-1:1);
+  const premiumTheme={line:'var(--accent)',dot:'var(--accent)',dotLast:'var(--accent-light)',dotStroke:'var(--nv-bg-2)',goalColor:'var(--warn2)',axis:'var(--tx-3)'};
   if(!b.length) return `<div class="scr-title" style="margin-bottom:6px">Bioimpedância</div>
-    <div class="scr-sub">Acompanhe sua composição corporal: gordura, massa magra e água ao longo do tratamento.</div>
-    <div class="card center"><div style="font-size:36px">🧬</div>
+    <div class="scr-sub">Acompanhe sua composição corporal: gordura, massa muscular e água ao longo do tratamento.</div>
+    <div class="gcard center"><div style="font-size:36px">🧬</div>
       <p class="muted" style="font-size:13px;margin:8px 0 14px">Nenhuma medição ainda. Registre a primeira para começar a ver a evolução.</p>
-      <button class="btn btn-primary btn-block" onclick="openSheet('bio')">${icon('plus',true)} Registrar bioimpedância</button></div>`;
+      <button class="btn-pill block" onclick="openSheet('bio')">${icon('plus',true)} Registrar bioimpedância</button></div>`;
   const first=b[0], last=b[b.length-1];
   const fatData=b.filter(x=>x.gordura!=null).map(x=>({x:x.date,y:x.gordura}));
-  const leanData=b.filter(x=>x.massaMagra!=null).map(x=>({x:x.date,y:x.massaMagra}));
+  const leanData=b.filter(x=>x.massaMagraPct!=null).map(x=>({x:x.date,y:x.massaMagraPct}));
   return `<div class="scr-title" style="margin-bottom:6px">Bioimpedância</div>
-  <div class="scr-sub">Última medição em ${fmtBRy(last.date)} · ${b.length} registro(s).</div>
+  <div class="scr-sub">Última medição em ${fmtBRy(last.date)} · ${b.length} ${plural(b.length,'registro','registros')}.</div>
 
   <div class="biggrid">
     ${BIOM.map(m=>{if(last[m.id]==null)return'';
       const d=first[m.id]!=null?+(last[m.id]-first[m.id]).toFixed(1):null;
       const good=d==null?false:(m.better==='down'?d<0:d>0);
-      return `<div class="stat"><div class="k">${m.nome}</div>
+      return `<div class="stat-tile2"><div class="k">${m.nome}</div>
         <div class="v" style="font-size:21px">${fmtBio(last[m.id],m.un)}<small> ${m.un}</small></div>
-        ${d!=null&&d!==0?`<span class="delta ${good?'down':'up'}">${d>0?'+':'−'}${fmtBio(Math.abs(d),m.un)} ${m.un}</span>`:''}</div>`;
+        ${d!=null&&d!==0?`<span class="delta2 ${good?'down':'up'}">${d>0?'+':'−'}${fmtBio(Math.abs(d),m.un)} ${m.un}</span>`:''}</div>`;
     }).join('')}
   </div>
 
-  ${fatData.length>=2?`<div class="card tight"><div class="eyebrow">Gordura corporal (%)</div>${lineChart(fatData,null)}</div>`:''}
-  ${leanData.length>=2?`<div class="card tight"><div class="eyebrow">Massa magra (kg)</div>${lineChart(leanData,null)}</div>`:''}
+  ${fatData.length>=2?`<div class="gcard tight"><div class="eyebrow2">Gordura corporal (%)</div>${lineChart(fatData,null,premiumTheme)}</div>`:''}
+  ${leanData.length>=2?`<div class="gcard tight"><div class="eyebrow2">Massa muscular (%)</div>${lineChart(leanData,null,premiumTheme)}</div>`:''}
 
-  <button class="btn btn-primary btn-block" onclick="openSheet('bio')">${icon('plus',true)} Nova medição</button>
+  <button class="btn-pill block" onclick="openSheet('bio')">${icon('plus',true)} Nova medição</button>
 
-  <div class="card mt14"><h3>Histórico</h3><div class="list">
-    ${[...b].reverse().map(r=>`<div class="item"><div class="badge-ico">${icon('pulse')}</div>
-      <div><div class="t">${fmtBRy(r.date)}</div><div class="s">${[r.gordura!=null?nf(r.gordura)+'% gordura':'',r.massaMagra!=null?nf(r.massaMagra)+' kg magra':''].filter(Boolean).join(' · ')||'—'}</div></div></div>`).join('')}
+  <div class="gcard mt14"><h3>Histórico</h3><div class="hist-list">
+    ${[...b].reverse().map(r=>`<div class="hist-item"><div class="badge-glow">${icon('pulse')}</div>
+      <div><div class="t">${fmtBRy(r.date)}</div><div class="s">${[r.gordura!=null?nf(r.gordura)+'% gordura':'',r.massaMagraPct!=null?nf(r.massaMagraPct)+'% muscular':''].filter(Boolean).join(' · ')||'—'}</div></div></div>`).join('')}
   </div></div>`;
 }
 
@@ -1870,7 +1895,7 @@ function relatorioView(){
     ['check','Adesão ao plano',stats.adesaoPlano+'%'],
   ];
   return `
-  <div class="ap-head">
+  <div class="ap-head ap-head-screen">
     <button type="button" class="ap-back" onclick="go('mais')" aria-label="Voltar">${CAL_CHEV_L}</button>
     <span class="ap-title">Relatórios</span>
     <span class="ap-head-spacer"></span>
@@ -1901,7 +1926,7 @@ function relatorioView(){
     ${lineChartPremium(d.w.map(x=>({x:x.date,y:x.peso})),S.profile.pesoMeta)}
   </div>
 
-  <button class="btn-pill block" style="margin-top:18px;font-size:15.5px" onclick="gerarRelatorio()">
+  <button id="gerar-relatorio-btn" class="btn-pill block" style="margin-top:18px;font-size:15.5px" onclick="gerarRelatorio()">
     ${icon('doc',true)} Gerar relatório em PDF
   </button>
   <p style="font-size:11.5px;margin-top:10px;line-height:1.5;color:var(--tx-3);text-align:center">O relatório é gerado no seu dispositivo. Nenhum arquivo é salvo automaticamente.</p>`;
@@ -2032,7 +2057,7 @@ function gerarResumo(d,ini,fim){
   const sintTxt=nSint===0?'Não foram registrados sintomas relevantes no período'
     :nSint<=3?'Os sintomas registrados foram leves e ocasionais'
     :'Foram registrados sintomas com certa frequência ao longo do período';
-  const appTxt=d.apps.length>0?`, com ${d.apps.length} aplicação(ões) de ${esc(S.profile.medicamento)} realizada(s) no intervalo`:'';
+  const appTxt=d.apps.length>0?`, com ${d.apps.length} ${plural(d.apps.length,'aplicação','aplicações')} de ${esc(S.profile.medicamento)} ${plural(d.apps.length,'realizada','realizadas')} no intervalo`:'';
   frases.push(`${sintTxt}${appTxt}.`);
 
   frases.push('Este relatório foi gerado automaticamente a partir dos registros do paciente e não substitui a avaliação do médico ou nutricionista responsável.');
@@ -2128,8 +2153,8 @@ function buildPDF(d,ini,fim){
   /* evolução da bioimpedância */
   function bioSec(){
     if(!d.bio||!d.bio.length) return '';
-    const BIOM=[['gordura','Gordura corporal','%','down'],['massaMagra','Massa magra','kg','up'],
-      ['musculo','Massa muscular','kg','up'],['agua','Água corporal','%','up'],
+    const BIOM=[['gordura','Gordura corporal','%','down'],['massaMagraPct','Massa muscular (%)','%','up'],
+      ['musculo','Massa muscular (kg)','kg','up'],['agua','Água corporal','%','up'],
       ['visceral','Gordura visceral','','down'],['tmb','Metabolismo basal','kcal','up']];
     const bf=d.bio[0], bl=d.bio[d.bio.length-1];
     const single=d.bio.length<2;
@@ -2472,20 +2497,22 @@ function mostrarPreview(html,ini,fim){
   w.document.close();
 }
 
-function gerarRelatorio(){
+async function gerarRelatorio(){
   if(FEATURES && LICENSE && !LICENSE.can(FEATURES.REPORTS)){ go('premium'); return; }
   const{ini,fim}=periodoRange();
   if(ini>fim){toast('A data inicial deve ser anterior à final');return;}
-  toast('Gerando relatório…');
-  setTimeout(()=>{
-    try{
-      const d=coletaDados(ini,fim);
-      mostrarPreview(buildPDF(d,ini,fim),ini,fim);
-    }catch(e){
-      console.error(e);
-      toast('Não foi possível gerar o relatório agora. Tente novamente em instantes.');
-    }
-  },80);
+  await withAuthBtn('gerar-relatorio-btn','Gerando…',()=>new Promise(resolve=>{
+    setTimeout(()=>{
+      try{
+        const d=coletaDados(ini,fim);
+        mostrarPreview(buildPDF(d,ini,fim),ini,fim);
+      }catch(e){
+        console.error(e);
+        toast('Não foi possível gerar o relatório agora. Tente novamente em instantes.');
+      }
+      resolve();
+    },80);
+  }));
 }
 
 /* ============================================================
@@ -2531,7 +2558,7 @@ function welcomeView(){
       </div>
       <div class="welcome-bottom">
         <button class="btn-pill block" onclick="iniciarFluxoLogin()">Começar agora
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          ${AUTH_ARROW}
         </button>
       </div>
     </div>
@@ -2709,10 +2736,12 @@ async function doUpdatePassword(){
   });
 }
 async function doLogout(){
-  const auth=await window.__authReady;
-  const r=await auth.signOut();
-  if(!r.ok){ toast(r.error); return; }
-  // o listener SIGNED_OUT (registrarListenerAuth) volta para a tela de boas-vindas.
+  await withAuthBtn('logout-btn','Saindo…',async()=>{
+    const auth=await window.__authReady;
+    const r=await auth.signOut();
+    if(!r.ok){ toast(r.error); return; }
+    // o listener SIGNED_OUT (registrarListenerAuth) volta para a tela de boas-vindas.
+  });
 }
 
 /* ---------- verificação e reação a mudanças de sessão Supabase ---------- */

@@ -34,7 +34,10 @@ function janelaRecente(records, dias, campo='date'){
   if(!records.length) return records;
   let maisRecente = records[0][campo];
   for(const r of records){ if(r[campo]>maisRecente) maisRecente=r[campo]; }
-  const limite = new Date(maisRecente+'T00:00:00'); limite.setDate(limite.getDate()-dias);
+  // "últimos N dias" = N dias corridos terminando no mais recente (inclusive dos dois lados),
+  // por isso o limite é maisRecente-(N-1), não maisRecente-N — senão a janela tem N+1 dias
+  // e o texto ("últimos N dias") destoa da contagem real mostrada na tela.
+  const limite = new Date(maisRecente+'T00:00:00'); limite.setDate(limite.getDate()-(dias-1));
   const limiteISO = isoFromDate(limite);
   return records.filter(r=>r[campo]>=limiteISO);
 }
