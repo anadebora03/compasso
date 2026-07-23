@@ -1475,12 +1475,12 @@ function startExample(){S=seedExample();save();toast('Dados de exemplo carregado
 /* ============================================================
    SVG · componentes
    ============================================================ */
-function logoSVG(size=24,color='var(--green)',needleColor){
+function logoSVG(size=24,color='var(--nv-bg)',needleColor){
   const nc=needleColor||color;
   return `<svg class="mark" width="${size}" height="${size}" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:${size}px;height:${size}px">
     <circle cx="20" cy="20" r="18" stroke="${color}" stroke-width="2.4"/>
     <path d="M20 6 L24 20 L20 34 L16 20 Z" fill="${nc}"/>
-    <circle cx="20" cy="20" r="3.2" fill="${color==='var(--green)'?'#fff':'var(--green-deep)'}"/>
+    <circle cx="20" cy="20" r="3.2" fill="var(--nv-bg)"/>
   </svg>`;
 }
 /* Variante com efeito 3D (gradientes, brilho, sombra) — usada apenas na tela de Boas-vindas. */
