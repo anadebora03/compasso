@@ -562,7 +562,11 @@
      gerou confusão (sobreposição, texto cortado ao rolar). A tela já tem
      navegação sempre acessível pela barra inferior — não precisa de um segundo
      cabeçalho grudado no topo. */
-  .ap-head.ap-head-screen{position:static;margin:0 -18px;padding-left:18px;padding-right:18px}
+  .ap-head.ap-head-screen{position:static;margin:0 -18px;padding-left:18px;padding-right:18px;padding-top:10px;padding-bottom:10px}
+  /* Tema claro: --nv-bg-2 (branco puro) destoa do fundo --nv-bg (quase-branco
+     azulado) da tela por trás — no tema escuro os dois já são bem próximos,
+     por isso só o claro precisa dessa correção. */
+  :root[data-theme="light"] .ap-head.ap-head-screen{background:var(--nv-bg)}
   .ap-back{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;
     color:var(--tx-2);transition:background var(--dur-fast) var(--ease-out)}
   .ap-back:active{background:var(--nv-glass-strong)}

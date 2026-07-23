@@ -709,7 +709,7 @@ function premiumView(){
     <span class="ap-title">Compasso Premium</span>
     <span class="ap-head-spacer"></span>
   </div>
-  <p class="scr-sub" style="margin-top:-6px">Desbloqueie todo o potencial do seu acompanhamento.</p>
+  <p class="scr-sub">Desbloqueie todo o potencial do seu acompanhamento.</p>
 
   ${plano!=='free'?`<div class="gcard tight" style="margin-bottom:14px"><div class="between">
     <div><div class="eyebrow2" style="margin:0">Seu plano atual</div><div style="font-size:15px;font-weight:700;color:var(--tx-1);margin-top:4px">${plano==='monthly'?'Premium Mensal':'Premium Anual'}</div></div>
@@ -1921,7 +1921,7 @@ function relatorioView(){
     <span class="ap-title">Relatórios</span>
     <span class="ap-head-spacer"></span>
   </div>
-  <div class="scr-sub" style="margin-top:-6px">Selecione o período e gere um PDF da sua evolução para compartilhar com sua equipe de saúde.</div>
+  <div class="scr-sub">Selecione o período e gere um PDF da sua evolução para compartilhar com sua equipe de saúde.</div>
 
   <div class="chip-row">
     ${opt.map(([id,lbl])=>`<button class="chip-glass ${RPeriodo===id?'active':''}" onclick="setPeriodo('${id}')">${lbl}</button>`).join('')}
