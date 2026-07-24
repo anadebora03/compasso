@@ -1500,6 +1500,22 @@ function startExample(){S=seedExample();save();toast('Dados de exemplo carregado
    da bússola antiga. Cores por token — nunca cravadas, pra funcionar igual
    nos dois temas (tema claro precisa de seringa escura, não branca). */
 function logoSVG(size=24){
+  /* Abaixo de ~26px os traços finos e as marcas de dose da versão detalhada
+     viram uma mancha ilegível (confirmado renderizando de verdade em 16 e
+     22px) — usa um traçado mais grosso e sem detalhe interno nesses tamanhos. */
+  if(size<26){
+    return `<svg class="mark" width="${size}" height="${size}" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:${size}px;height:${size}px">
+    <circle cx="20" cy="20" r="14" stroke="var(--accent)" stroke-width="3.6" stroke-linecap="round"
+      stroke-dasharray="66 88" stroke-dashoffset="7" transform="rotate(-90 20 20)"/>
+    <circle cx="29.5" cy="10.5" r="3.4" fill="var(--accent)"/>
+    <g transform="rotate(45 20 20)">
+      <rect x="17.6" y="4" width="4.8" height="3.6" rx="1.3" fill="var(--tx-1)"/>
+      <rect x="16.4" y="9.4" width="7.2" height="3" rx="1.3" fill="var(--tx-1)"/>
+      <rect x="17.4" y="12.4" width="5.2" height="14" rx="1.6" fill="var(--tx-1)"/>
+      <polygon points="17.6,26 22.4,26 20,38" fill="var(--tx-1)"/>
+    </g>
+  </svg>`;
+  }
   return `<svg class="mark" width="${size}" height="${size}" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:${size}px;height:${size}px">
     <circle cx="20" cy="20" r="15" stroke="var(--accent)" stroke-width="2.4" stroke-linecap="round"
       stroke-dasharray="70.5 94.2" stroke-dashoffset="7" transform="rotate(-90 20 20)"/>

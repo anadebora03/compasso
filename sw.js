@@ -7,7 +7,7 @@
 // Bump a cada release que altera qualquer arquivo do APP_SHELL abaixo — é o
 // único jeito de o cache stale-while-revalidate parar de servir a versão
 // antiga no primeiro carregamento após o deploy (ver RC2: "Minha Jornada").
-const CACHE_VERSION = 'build-20260724e';
+const CACHE_VERSION = 'build-20260724f';
 const CACHE_NAME = `compasso-cache-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -25,14 +25,14 @@ const APP_SHELL = [
   '/js/actionplan.js',
   '/js/license.js',
   '/manifest.json',
-  '/icons/icon-192.png?v=3',
-  '/icons/icon-512.png?v=3',
-  '/icons/icon-192-maskable.png?v=3',
-  '/icons/icon-512-maskable.png?v=3',
-  '/icons/apple-touch-icon.png?v=3',
-  '/icons/favicon-16.png?v=3',
-  '/icons/favicon-32.png?v=3',
-  '/favicon.ico?v=3',
+  '/icons/icon-192.png?v=4',
+  '/icons/icon-512.png?v=4',
+  '/icons/icon-192-maskable.png?v=4',
+  '/icons/icon-512-maskable.png?v=4',
+  '/icons/apple-touch-icon.png?v=4',
+  '/icons/favicon-16.png?v=4',
+  '/icons/favicon-32.png?v=4',
+  '/favicon.ico?v=4',
 ];
 
 self.addEventListener('install', (event) => {
