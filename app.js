@@ -187,7 +187,7 @@ function topView(){
   const titles={inicio:'',aplicacao:'',evolucao:'',diario:'',mais:''};
   return `<div class="top">
     <div class="brand">
-      ${logoSVG(22,'#fff','var(--accent-light)')}
+      ${logoSVG(22)}
       <div><h1>Compasso</h1><div class="greet">${greeting()}, ${esc(S.profile.nome)}</div></div>
     </div>
     <button class="badge-ico" onclick="toggleTheme()" aria-label="Alternar tema">${icon(THEME==='dark'?'sun':'moon')}</button>
@@ -600,7 +600,7 @@ function journeyView(){
   return `
   <div class="scr-title" style="margin-bottom:14px">Minha jornada</div>
   <div class="gcard journey">
-    ${logoSVG(30,'#fff')}
+    ${logoSVG(30)}
     <p class="q" style="margin-top:14px">${txt}</p>
     <div class="sig">Resumo gerado automaticamente</div>
   </div>
@@ -1496,12 +1496,26 @@ function startExample(){S=seedExample();save();toast('Dados de exemplo carregado
 /* ============================================================
    SVG · componentes
    ============================================================ */
-function logoSVG(size=24,color='var(--nv-bg)',needleColor){
-  const nc=needleColor||color;
+/* Marca Compasso: mostrador parcial (dose) + seringa na diagonal, no lugar
+   da bússola antiga. Cores por token — nunca cravadas, pra funcionar igual
+   nos dois temas (tema claro precisa de seringa escura, não branca). */
+function logoSVG(size=24){
   return `<svg class="mark" width="${size}" height="${size}" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:${size}px;height:${size}px">
-    <circle cx="20" cy="20" r="18" stroke="${color}" stroke-width="2.4"/>
-    <path d="M20 6 L24 20 L20 34 L16 20 Z" fill="${nc}"/>
-    <circle cx="20" cy="20" r="3.2" fill="var(--nv-bg)"/>
+    <circle cx="20" cy="20" r="15" stroke="var(--accent)" stroke-width="2.4" stroke-linecap="round"
+      stroke-dasharray="70.5 94.2" stroke-dashoffset="7" transform="rotate(-90 20 20)"/>
+    <line x1="24" y1="16" x2="30" y2="10" stroke="var(--accent)" stroke-width="1.4"/>
+    <circle cx="30" cy="10" r="2.6" fill="var(--accent)"/>
+    <circle cx="33.5" cy="14.5" r="1.6" fill="var(--accent-light)"/>
+    <g transform="rotate(45 20 20)">
+      <rect x="18.2" y="3" width="3.6" height="2.8" rx="1" fill="var(--tx-1)"/>
+      <rect x="19.3" y="5.8" width="1.4" height="3.2" fill="var(--tx-1)"/>
+      <rect x="16.6" y="9" width="6.8" height="2.6" rx="1.1" fill="var(--tx-1)"/>
+      <rect x="17.6" y="11.5" width="4.8" height="14.5" rx="1.4" fill="var(--tx-1)"/>
+      <rect x="18.3" y="14.8" width="3.4" height=".8" fill="var(--nv-bg)"/>
+      <rect x="18.3" y="18.2" width="3.4" height=".8" fill="var(--nv-bg)"/>
+      <rect x="18.3" y="21.6" width="3.4" height=".8" fill="var(--nv-bg)"/>
+      <polygon points="18,26 22,26 20,38" fill="var(--tx-1)"/>
+    </g>
   </svg>`;
 }
 /* Variante com efeito 3D (gradientes, brilho, sombra) — usada apenas na tela de Boas-vindas. */
@@ -1515,26 +1529,26 @@ function logoHeroSVG(size=84){
         <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
       </radialGradient>
       <linearGradient id="${id}ring" x1="6" y1="3" x2="34" y2="37" gradientUnits="userSpaceOnUse">
-        <stop offset="0" stop-color="#ffffff"/>
-        <stop offset="1" stop-color="#5C9EEF"/>
-      </linearGradient>
-      <linearGradient id="${id}north" x1="20" y1="6" x2="20" y2="20" gradientUnits="userSpaceOnUse">
-        <stop offset="0" stop-color="#ffffff"/>
-        <stop offset="1" stop-color="#CFE6FF"/>
-      </linearGradient>
-      <linearGradient id="${id}south" x1="20" y1="20" x2="20" y2="34" gradientUnits="userSpaceOnUse">
-        <stop offset="0" stop-color="#5C9EEF"/>
-        <stop offset="1" stop-color="#2E6FC9"/>
+        <stop offset="0" stop-color="var(--accent-light)"/>
+        <stop offset="1" stop-color="var(--accent-deep)"/>
       </linearGradient>
     </defs>
     <circle cx="20" cy="20" r="19" fill="url(#${id}orb)"/>
-    <circle cx="20" cy="20" r="18" stroke="url(#${id}ring)" stroke-width="2.2" fill="none"/>
+    <circle cx="20" cy="20" r="15" stroke="url(#${id}ring)" stroke-width="2.2" stroke-linecap="round"
+      stroke-dasharray="70.5 94.2" stroke-dashoffset="7" transform="rotate(-90 20 20)"/>
+    <line x1="24" y1="16" x2="30" y2="10" stroke="var(--accent)" stroke-width="1.4"/>
+    <circle cx="30" cy="10" r="2.8" fill="var(--accent)"/>
+    <circle cx="33.5" cy="14.5" r="1.7" fill="var(--accent-light)"/>
     <g transform="rotate(45 20 20)">
-      <path d="M20 6 L24 20 L16 20 Z" fill="url(#${id}north)"/>
-      <path d="M20 34 L24 20 L16 20 Z" fill="url(#${id}south)"/>
+      <rect x="18.2" y="3" width="3.6" height="2.8" rx="1" fill="var(--tx-1)"/>
+      <rect x="19.3" y="5.8" width="1.4" height="3.2" fill="var(--tx-1)"/>
+      <rect x="16.6" y="9" width="6.8" height="2.6" rx="1.1" fill="var(--tx-1)"/>
+      <rect x="17.6" y="11.5" width="4.8" height="14.5" rx="1.4" fill="var(--tx-1)"/>
+      <rect x="18.3" y="14.8" width="3.4" height=".8" fill="var(--nv-bg)"/>
+      <rect x="18.3" y="18.2" width="3.4" height=".8" fill="var(--nv-bg)"/>
+      <rect x="18.3" y="21.6" width="3.4" height=".8" fill="var(--nv-bg)"/>
+      <polygon points="18,26 22,26 20,38" fill="var(--tx-1)"/>
     </g>
-    <circle cx="20" cy="20" r="2.6" fill="#0B1220"/>
-    <circle cx="20" cy="20" r="2.6" fill="none" stroke="rgba(255,255,255,.5)" stroke-width=".6"/>
   </svg>`;
 }
 function ringSVG(prog,dose,unit){
