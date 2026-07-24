@@ -524,14 +524,9 @@
   .progress-dots span{width:24px;height:4px;border-radius:2px;background:var(--nv-glass)}
   .progress-dots span.on{background:var(--accent)}
 
-  /* Halo de luz reutilizável — múltiplas camadas suaves, não uma sombra única */
+  /* Wrapper da marca nas telas de boas-vindas/onboarding — sem halo: a marca
+     fica chapada, igual ao ícone do app (pedido explícito, sem brilho). */
   .glow-wrap{position:relative;display:inline-flex}
-  .glow-wrap:before{content:"";position:absolute;inset:-55%;z-index:-1;border-radius:50%;
-    background:
-      radial-gradient(circle, rgba(255,255,255,.5) 0%, transparent 26%),
-      radial-gradient(circle, var(--accent-glow) 0%, transparent 46%),
-      radial-gradient(circle, rgba(79,163,255,.22) 0%, transparent 68%);
-    filter:blur(6px)}
 
   /* Bottom sheet / modal em vidro */
   .backdrop-glass{position:fixed;inset:0;background:rgba(5,10,18,.6);z-index:40;

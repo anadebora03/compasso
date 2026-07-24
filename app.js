@@ -1539,17 +1539,11 @@ function logoHeroSVG(size=84){
   const id='lh'+size;
   return `<svg width="${size}" height="${size}" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" class="welcome-icon" style="width:${size}px;height:${size}px;overflow:visible">
     <defs>
-      <radialGradient id="${id}orb" cx="36%" cy="26%" r="80%">
-        <stop offset="0" stop-color="rgba(255,255,255,.45)"/>
-        <stop offset="55%" stop-color="rgba(255,255,255,.08)"/>
-        <stop offset="100%" stop-color="rgba(255,255,255,0)"/>
-      </radialGradient>
       <linearGradient id="${id}ring" x1="6" y1="3" x2="34" y2="37" gradientUnits="userSpaceOnUse">
         <stop offset="0" stop-color="var(--accent-light)"/>
         <stop offset="1" stop-color="var(--accent-deep)"/>
       </linearGradient>
     </defs>
-    <circle cx="20" cy="20" r="19" fill="url(#${id}orb)"/>
     <circle cx="20" cy="20" r="15" stroke="url(#${id}ring)" stroke-width="2.2" stroke-linecap="round"
       stroke-dasharray="70.5 94.2" stroke-dashoffset="7" transform="rotate(-90 20 20)"/>
     <line x1="24" y1="16" x2="30" y2="10" stroke="var(--accent)" stroke-width="1.4"/>
